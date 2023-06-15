@@ -20,8 +20,8 @@ clear all; clc;
 
 % dataset
 study = 'SMEP';
-subject = 'S01';
-block = [1:8, 10];
+subject = 'S02';
+block = [1:15];
 
 % choose relevant directories
 folder_lw = uigetdir(pwd, 'Choose the letswave folder');        % letswave masterfiles 
@@ -47,7 +47,7 @@ eval(['folders = ' answer ';']);
 clear answer prompt dlgtitle dims definput     
 
 % import the datasets 
-for f = 1:length(folders)
+for f = 2:length(folders)
     % display current block
     disp([subject  ' - block ' num2str(block(f))])
     
@@ -73,7 +73,7 @@ for f = 1:length(folders)
     % select TEP data + ECG
     disp('Splitting the datasets & saving')
     data_all = data; header_all = header;
-    labels = {header_all.chanlocs([1:32, 51:53]).labels};
+    labels = {header_all.chanlocs([1:30, 50:52]).labels};
     [header, data, ~] = RLW_arrange_channels(header_all, data_all, labels);
     
     % save dataset for letswave
@@ -81,7 +81,7 @@ for f = 1:length(folders)
     CLW_save([], header, data);
     
     % select SMEP data + ECG, save for letswave
-    labels = {header_all.chanlocs(33:53).labels};
+    labels = {header_all.chanlocs([31:52]).labels};
     [header, data, ~] = RLW_arrange_channels(header_all, data_all, labels);
     header.name = [subject ' ' prefix{2} ' b' num2str(block(f))];
     CLW_save([], header, data);
@@ -117,7 +117,7 @@ for b = block
     clear index
     
     % discard duplicates if necessary
-    if length(header.events) > 75
+    if length(header.events) > 80
         fprintf('Removing duplicate triggers...')
         for a = 1:length(header.events)
             latencies(a) = header.events(a).latency;

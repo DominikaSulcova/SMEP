@@ -18,6 +18,9 @@
 %   ...visual inspection...
 %   2) interpolate TMS artifact + remove ECG
 %   3) frequency filter, segmentation + linear detrend 
+%   4) split into conditions
+%   5) visual inspection
+%   6) ICA - compute matrix
 %   
 % 
 %% parameters
@@ -25,8 +28,8 @@ clear all; clc;
 
 % dataset
 measure = 'SMEP';
-subject = 'S01';
-block = [1:8, 10];
+subject = 'S02';
+block = [1:15];
 condition = {'M1_single', 'M1_paired', 'CTRL'}; 
 
 % choose relevant directories
@@ -43,7 +46,7 @@ fig_counter = 1;
 % coordinates. If not, disable the first preprocessing step.
 % ----- section input -----
 suffix = {'dc1'};
-coordinates_path = 'F:\letswave7-master\letswave7-master\res\electrodes\spherical_locations\SPINAL_17chan.locs';
+coordinates_path = 'F:\letswave7-master\letswave7-master\res\electrodes\spherical_locations\SPINAL_17+1chan.locs';
 % ------------------------- 
 % add letswave 7 to the top of search path
 addpath(genpath([folder_lw '\letswave7-master']));
@@ -134,15 +137,18 @@ for b = block
     for i = 1:size(data_ECG, 2)
         subplot(4,7,i);
         plot(input(i,(1:(fs * duration))));
+        text(3500, 100, num2str(i), 'FontSize', 14, 'FontWeight', 'bold')
         ylim([-150 150])
     end
     fig_counter = fig_counter + 1;
 
     % decide the number of last components to be removed
-    comp_num = str2double(inputdlg('Number of components to remove: '));
+    comp2remove = str2num(cell2mat(inputdlg('Number of components to remove: ', 'ECG artifact removal', [1 50], {'[1]'})));
+    comps2keep = 1:size(data_all, 2);
+    comps2keep = comps2keep(~ismember(comps2keep, comp2remove));
     
     % apply PCA matrix, withdraw artifactual components 
-    [header_all, data_all] = RLW_ICA_apply_filter(header_all, data_all, matrix.ica_mm, matrix.ica_um, 1:size(data_all, 2) - comp_num);
+    [header_all, data_all] = RLW_ICA_apply_filter(header_all, data_all, matrix.ica_mm, matrix.ica_um, comps2keep);
     
     % save for letswave 
     header_all.name = [suffix{5} ' ' suffix{2} ' ' suffix{1} ' ' header_all.name];
@@ -151,13 +157,13 @@ end
 
 % update prefix
 prefix = [suffix{5} ' ' suffix{2} ' ' suffix{1} ' ' prefix];
-clear fs duration ds_ratio suffix b i a index apply_list header_all data_all data_ECG header_ECG matrix data_visual input comp_num fig
+clear fs duration ds_ratio suffix b i a index apply_list header_all data_all data_ECG header_ECG matrix data_visual input comp2_remove comp2_keep fig
 
 %% 3) frequency filter, segmentation + linear detrend 
 % ----- section input -----
-suffix = {'reref' 'spinal' 'bandpass' 'notch' 'ep' 'dc2'};
+suffix = {'spinal' 'reref' 'bandpass' 'notch' 'ep' 'dc2'};
 bandpass = [2 1000];
-epoch = [-0.05 0.1];
+epoch = [-0.2 0.5];
 % -------------------------  
 % add letswave 7 to the top of search path
 addpath(genpath([folder_lw '\letswave7-master']));
@@ -169,16 +175,16 @@ for b = block
     dataset = [folder_output '\' prefix ' ' subject ' ' measure ' b' num2str(b) '.lw6'];
     option = struct('filename', dataset);
     lwdata = FLW_load.get_lwdata(option);
-       
-%     % re-reference to side channels --> remove muscular activity
-%     disp('Re-referencing...')
-%     option = struct('reference_list', {electrodes(14:17)}, 'apply_list', {electrodes(1:13)}, 'suffix', suffix{1}, 'is_save', 0);
-%     lwdata = FLW_rereference.get_lwdata(lwdata, option);
     
     % select spinal electrodes
     disp('Selecting spinal electrodes...')
-    option = struct('type', 'channel', 'items', {{lwdata.header.chanlocs(1:17).labels}}, 'suffix', suffix{2}, 'is_save', 0);
+    option = struct('type', 'channel', 'items', {{lwdata.header.chanlocs(1:18).labels}}, 'suffix', suffix{2}, 'is_save', 0);
     lwdata = FLW_selection.get_lwdata(lwdata, option);
+    
+%     % re-reference to common average
+%     disp('Re-referencing...')
+%     option = struct('reference_list', {{lwdata.header.chanlocs(1:18).labels}}, 'apply_list', {{lwdata.header.chanlocs(1:17).labels}}, 'suffix', suffix{1}, 'is_save', 0);
+%     lwdata = FLW_rereference.get_lwdata(lwdata, option);
     
     % bandpass
     disp('Applying Butterworth bandpass filter...')
@@ -205,35 +211,46 @@ for b = block
 end
 
 % update prefix
-for s = 2 : length(suffix)
+for s = [1, 3 : length(suffix)]
     prefix = [suffix{s} ' ' prefix];
 end
 clear suffix bandpass epoch ds_ratio b s dataset option lwdata 
 
-%% split into conditions
+%% 4) split into conditions
 % ----- section input -----
 % ------------------------- 
-% % load order of stimulation
-% load([ '.mat'])
+% add letswave 7 to the top of search path
+addpath(genpath([folder_lw '\letswave7-master']));
 
-evencodes(10, 1:25) = condition(3);
-evencodes(10, 26:50) = condition(1);
-evencodes(10, 51:75) = condition(2);
+% load order of stimulation --> stim_order
+load([study '_' subject([2:3]) 'stim_order.mat'])
+% S01:
+% eventcodes(10, 1:25) = condition(3);
+% eventcodes(10, 26:50) = condition(1);
+% eventcodes(10, 51:75) = condition(2);
 
 for b = block
-    % load header
-    load([folder_output '\' prefix ' ' subject ' ' measure ' b' num2str(b) '.lw6'], '-mat'); 
+    % get the dataset
+    fprintf('Block %d - parsing per condition...', num2str(b))
+    dataset = [folder_output '\' prefix ' ' subject ' ' measure ' b' num2str(b) '.lw6'];
+    option = struct('filename', dataset);
+    lwdata = FLW_load.get_lwdata(option);
     
-    % replace event codes, save header
-    for e = 1:length(header.events)
-        header.events(e).code = evencodes{b, e};
+    % verify the condition
+    for c = 1:length(condition)
+        if strcmp(condition{c}, stim_order{c})
+            % replace event codes
+            for e = 1:length(header.events)
+                header.events(e).code = condition{c};
+            end
+
+        end
     end
-    save([folder_output '\' prefix ' ' subject ' ' measure ' b' num2str(b) '.lw6'], 'header');
+    
 end
 clear evencodes b e header
 
-% add letswave 7 to the top of search path
-addpath(genpath([folder_lw '\letswave7-master']));
+
 
 % split per event code
 fprintf('Parsing per condition...')
@@ -250,11 +267,11 @@ for b = block
             'suffix', '', 'is_save', 0);
         lwdataset = FLW_segmentation_separate.get_lwdataset(lwdata, option); 
 
-        % rename 
-        lwdataset.header.name = [condition{c} ' ' prefix ' ' subject ' ' measure ' b' num2str(b) '.lw6'];
+        % rename & save for letswave
+        header.name = [condition{c} ' ' prefix ' ' subject ' ' measure ' b' num2str(b) '.lw6'];
 
         % save into a dataset for merging
-        data2merge(c, b) = lwdataset;
+        data2merge(c, end + 1) = lwdataset;
     end
 end
 clear b dataset option lwdata lwdataset 
@@ -276,9 +293,11 @@ clear b dataset option lwdata lwdataset
     logfile_entry('parse', filename)   
     fprintf('done.\n')
 
-%% visual inspection
+clear dataset   
+    
+%% 5) visual inspection
 % ----- section input -----
-suffix = {'visual'};
+prefix2 = 'visual';
 % ------------------------- 
 % add letswave 6 to the top of search path
 addpath(genpath([folder_lw '\letswave6-master']));
@@ -286,10 +305,7 @@ addpath(genpath([folder_lw '\letswave6-master']));
 % open letswave and discard bad epochs based on visual inspection
 letswave
 
-% update prefix
-prefix = [suffix{1} ' ' prefix];
-
-%% ICA - compute matrix
+%% 6) ICA - compute matrix
 % ----- section input -----
 suffix = {'ica_PICA'};
 % ------------------------- 
@@ -297,8 +313,8 @@ suffix = {'ica_PICA'};
 addpath(genpath([folder_lw '\letswave7-master']));
 
 % load the dataset
-for b = 1:length(block)
-    dataset{b} = [folder_output '\' prefix ' ' measure ' ' subject ' ' block{b}];
+for c = 1:length(condition)
+    dataset{c} = [folder_output '\' prefix2 ' ' condition{c} ' ' prefix ' ' subject ' ' measure '.lw6'];
 end
 option = struct('filename', {dataset});
 lwdataset = FLW_load.get_lwdataset(option);
@@ -307,9 +323,12 @@ lwdataset = FLW_load.get_lwdataset(option);
 option = struct('ICA_mode', 3, 'algorithm', 1, 'percentage_PICA', 100, 'criterion_PICA', 'LAP', 'suffix', suffix, 'is_save', 1);
 lwdataset = FLW_compute_ICA_merged.get_lwdataset(lwdataset, option);
 
-% update prefix
-prefix = [suffix{1} ' ' prefix];
-clear suffix b dataset option lwdataset
+% update prefix 2
+prefix2 = [suffix{1} ' ' prefix2];
+clear suffix c dataset option lwdataset
+
+%%
+
 
 %% ICA - extract component features
 % ----- section input -----
