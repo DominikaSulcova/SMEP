@@ -20,12 +20,13 @@ clear all; clc;
 
 % dataset
 study = 'SMEP';
-subject = 'S02';
+subject = 'S03';
 block = [1:15];
 
 % choose relevant directories
 folder_lw = uigetdir(pwd, 'Choose the letswave folder');        % letswave masterfiles 
 folder_output = uigetdir(pwd, 'Choose the output folder');      % processed data
+cd(folder_output)
 
 % add letswave 6 to the top of search path
 addpath(genpath([folder_lw '\letswave6-master']));
@@ -47,7 +48,7 @@ eval(['folders = ' answer ';']);
 clear answer prompt dlgtitle dims definput     
 
 % import the datasets 
-for f = 2:length(folders)
+for f = 1:length(folders)
     % display current block
     disp([subject  ' - block ' num2str(block(f))])
     
@@ -69,6 +70,7 @@ for f = 2:length(folders)
     end
     header.events = header.events(index);
     fprintf('%d events found in the dataset.', length(header.events))
+    clear index
     
     % select TEP data + ECG
     disp('Splitting the datasets & saving')
@@ -86,7 +88,7 @@ for f = 2:length(folders)
     header.name = [subject ' ' prefix{2} ' b' num2str(block(f))];
     CLW_save([], header, data);
 end
-clear prefix folder_input folders f i d index labels header data header_all data_all
+clear prefix folder_input folders f d labels header data header_all data_all
 
 %% import MEP data
 % define prefix
@@ -96,7 +98,7 @@ prefix = {'MEP'};
 folder_input = uigetdir(pwd, 'Coose the input folder');
 
 % import the datasets 
-for b = block
+for b = 5%block
     % display current block
     disp([subject  ' - block ' num2str(b)])
     

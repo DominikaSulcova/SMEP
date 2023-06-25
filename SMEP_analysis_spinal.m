@@ -16,7 +16,7 @@
 % raw data (letswave format):
 %   1) assign electrode coordinates + detrend
 %   ...visual inspection...
-%   2) interpolate TMS artifact + remove ECG
+%   2) interpolate TMS artifact, interpolate bad electrodes if necessary + remove ECG
 %   3) frequency filter, segmentation + linear detrend 
 %   4) split into conditions
 %   5) visual inspection
@@ -73,7 +73,7 @@ end
 prefix = suffix{1};
 clear suffix coordinates_path b dataset option lwdata  
 
-%% 2) interpolate TMS artifact + remove ECG
+%% 2) interpolate TMS artifact, interpolate bad electrodes if necessary + remove ECG
 % ----- section input -----
 suffix = {'interp' 'ds' 'QRS' 'avg' 'ECG_clean'};
 fs = 4000;
@@ -82,6 +82,22 @@ ds_ratio = 5;
 % ------------------------- 
 % add letswave 6 to the top of search path
 addpath(genpath([folder_lw '\letswave6-master']));
+
+% ask for channles to interpolate
+chan2interp = inputdlg('Channel to interpolate: ', 'Bad channel', [1 50], {''});
+if length(chan2interp{1}) > 0
+    % identify channels to average
+    keepgoing = 1;
+    chan2avg = cell(0, 0);
+    while keepgoing
+        chan = inputdlg(sprintf('Channel to average #%d: ', length(chan2avg) + 1), 'Bad channel', [1 50], {''});
+        if length(chan{1}) > 0                
+            chan2avg = cat(1, chan2avg, chan);
+        else
+           keepgoing = 0; 
+        end
+    end
+end
 
 % cycle through blocks
 for b = block
@@ -94,6 +110,12 @@ for b = block
     disp('Interpolating the TMS artifact from -0.005 to 0.002 s...')
     [header, data, ~] = RLW_suppress_artifact_event(header, data,...
         'xstart', -0.005, 'xend', 0.002, 'event_code', 'Stimulation', 'interp_method', 'pchip');
+    
+    % if necessary, interpolate a bad channel
+    if length(chan2interp{1}) > 0
+        % identify channels to average
+        [header, data, ~] = RLW_interpolate_channel(header, data, chan2interp(1), chan2avg);
+    end
     
     % downsample
     disp('Downsampling...')
@@ -143,12 +165,12 @@ for b = block
     fig_counter = fig_counter + 1;
 
     % decide the number of last components to be removed
-    comp2remove = str2num(cell2mat(inputdlg('Number of components to remove: ', 'ECG artifact removal', [1 50], {'[1]'})));
-    comps2keep = 1:size(data_all, 2);
-    comps2keep = comps2keep(~ismember(comps2keep, comp2remove));
+    comp2remove = str2num(cell2mat(inputdlg('Number of components to remove: ', 'ECG artifact removal', [1 50], {'[]'})));
+    comp2keep = 1:size(data_all, 2);
+    comp2keep = comp2keep(~ismember(comp2keep, comp2remove));
     
     % apply PCA matrix, withdraw artifactual components 
-    [header_all, data_all] = RLW_ICA_apply_filter(header_all, data_all, matrix.ica_mm, matrix.ica_um, comps2keep);
+    [header_all, data_all] = RLW_ICA_apply_filter(header_all, data_all, matrix.ica_mm, matrix.ica_um, comp2keep);
     
     % save for letswave 
     header_all.name = [suffix{5} ' ' suffix{2} ' ' suffix{1} ' ' header_all.name];
@@ -157,7 +179,8 @@ end
 
 % update prefix
 prefix = [suffix{5} ' ' suffix{2} ' ' suffix{1} ' ' prefix];
-clear fs duration ds_ratio suffix b i a index apply_list header_all data_all data_ECG header_ECG matrix data_visual input comp2_remove comp2_keep fig
+clear fs duration ds_ratio suffix b i a index apply_list header_all data_all data_ECG header_ECG matrix data_visual input ...
+    chan2interp chan2avg keepgoing comp2remove comp2keep fig
 
 %% 3) frequency filter, segmentation + linear detrend 
 % ----- section input -----
@@ -178,12 +201,12 @@ for b = block
     
     % select spinal electrodes
     disp('Selecting spinal electrodes...')
-    option = struct('type', 'channel', 'items', {{lwdata.header.chanlocs(1:18).labels}}, 'suffix', suffix{2}, 'is_save', 0);
+    option = struct('type', 'channel', 'items', {{lwdata.header.chanlocs(1:18).labels}}, 'suffix', suffix{1}, 'is_save', 0);
     lwdata = FLW_selection.get_lwdata(lwdata, option);
     
 %     % re-reference to common average
 %     disp('Re-referencing...')
-%     option = struct('reference_list', {{lwdata.header.chanlocs(1:18).labels}}, 'apply_list', {{lwdata.header.chanlocs(1:17).labels}}, 'suffix', suffix{1}, 'is_save', 0);
+%     option = struct('reference_list', {{lwdata.header.chanlocs(1:18).labels}}, 'apply_list', {{lwdata.header.chanlocs(1:17).labels}}, 'suffix', suffix{2}, 'is_save', 0);
 %     lwdata = FLW_rereference.get_lwdata(lwdata, option);
     
     % bandpass
@@ -223,77 +246,53 @@ clear suffix bandpass epoch ds_ratio b s dataset option lwdata
 addpath(genpath([folder_lw '\letswave7-master']));
 
 % load order of stimulation --> stim_order
-load([study '_' subject([2:3]) 'stim_order.mat'])
+folder_input = uigetdir(pwd, 'Coose the input folder');
+load([folder_input '\SMEP_' subject([2:3]) '_stim_order.mat'])
 % S01:
 % eventcodes(10, 1:25) = condition(3);
 % eventcodes(10, 26:50) = condition(1);
 % eventcodes(10, 51:75) = condition(2);
 
+% label and cluster by condition
+fprintf('parsing per condition...\n')
+counter = 1;
 for b = block
     % get the dataset
-    fprintf('Block %d - parsing per condition...', num2str(b))
     dataset = [folder_output '\' prefix ' ' subject ' ' measure ' b' num2str(b) '.lw6'];
     option = struct('filename', dataset);
     lwdata = FLW_load.get_lwdata(option);
     
     % verify the condition
     for c = 1:length(condition)
-        if strcmp(condition{c}, stim_order{c})
+        if strcmp(condition{c}, stim_order{b})
             % replace event codes
-            for e = 1:length(header.events)
-                header.events(e).code = condition{c};
+            for e = 1:length(lwdata.header.events)
+                lwdata.header.events(e).code = condition{c};
             end
-
+            
+            % rename & save into a dataset for merging
+            lwdata.header.name = sprintf('%s %s', subject, measure);
+            data2merge(c, counter) = lwdata;
         end
     end
     
+    % update counter if necessary
+    if mod(b, 3) == 0
+        counter = counter + 1;
+    end    
 end
-clear evencodes b e header
 
+% merge blocks according to conditions
+fprintf('merging datasets...\n')
+for c = 1:length(condition)
+    % subset the dataset
+    lwdataset = data2merge(c, :)';
 
-
-% split per event code
-fprintf('Parsing per condition...')
-for b = block
-    % get the dataset
-    dataset = [folder_output '\' prefix ' ' subject ' ' measure ' b' num2str(b) '.lw6'];
-    option = struct('filename', dataset);
-    lwdata = FLW_load.get_lwdata(option);
-
-    % split into datasets per eventcode
-    for c = 1:length(condition)
-        % segment
-        option = struct('event_labels', {condition(c)}, 'x_start', -0.05, 'x_end', 0.1, 'x_duration', 15, ...
-            'suffix', '', 'is_save', 0);
-        lwdataset = FLW_segmentation_separate.get_lwdataset(lwdata, option); 
-
-        % rename & save for letswave
-        header.name = [condition{c} ' ' prefix ' ' subject ' ' measure ' b' num2str(b) '.lw6'];
-
-        % save into a dataset for merging
-        data2merge(c, end + 1) = lwdataset;
-    end
+    % merge subjects & save 
+    option = struct('type', 'epoch', 'suffix', condition{c}, 'is_save', 1);
+    lwdata = FLW_merge.get_lwdata(lwdataset, option); 
 end
-clear b dataset option lwdata lwdataset 
-
-    % merge epochs according to conditions
-    fprintf('merging datasets...')
-    for c = 1:length(condition)
-        % subset the dataset
-        lwdataset = data2merge(c, :)';
-        
-        % merge subjects & save 
-        option = struct('type', 'epoch', 'suffix', '', 'is_save', 1);
-        lwdata = FLW_merge.get_lwdata(lwdataset, option); 
-    end
-    clear c 
-
-     % update the logfile
-    filename = [folder_logfiles '\AGSICI_' study '_' subj '.txt'];
-    logfile_entry('parse', filename)   
-    fprintf('done.\n')
-
-clear dataset   
+clear b c e option lwdata folder_input stim_order data2merge counter lwdataset dataset
     
 %% 5) visual inspection
 % ----- section input -----
@@ -314,7 +313,7 @@ addpath(genpath([folder_lw '\letswave7-master']));
 
 % load the dataset
 for c = 1:length(condition)
-    dataset{c} = [folder_output '\' prefix2 ' ' condition{c} ' ' prefix ' ' subject ' ' measure '.lw6'];
+    dataset{c} = [folder_output '\' prefix2 ' ' condition{c} ' ' subject ' ' measure '.lw6'];
 end
 option = struct('filename', {dataset});
 lwdataset = FLW_load.get_lwdataset(option);
@@ -327,9 +326,6 @@ lwdataset = FLW_compute_ICA_merged.get_lwdataset(lwdataset, option);
 prefix2 = [suffix{1} ' ' prefix2];
 clear suffix c dataset option lwdataset
 
-%%
-
-
 %% ICA - extract component features
 % ----- section input -----
 suffix = {'unmix' 'timecourse' 'frequency'};
@@ -338,10 +334,9 @@ suffix = {'unmix' 'timecourse' 'frequency'};
 addpath(genpath([folder_lw '\letswave7-master']));
 
 % unmix 
-for b = 1:length(block)
+for c = 1:length(condition)
     % get the dataset
-    disp([subject ' - ' block{b}])
-    dataset = [folder_output '\' prefix ' ' measure ' ' subject ' ' block{b} '.lw6'];
+    dataset = [folder_output '\' prefix2 ' ' condition{c} ' ' subject ' ' measure '.lw6'];
     option = struct('filename', dataset);
     lwdata = FLW_load.get_lwdata(option);
     
@@ -350,7 +345,7 @@ for b = 1:length(block)
     lwdata = FLW_spatial_filter_unmix.get_lwdata(lwdata, option);
     
     % append to the dataset for merging
-    lwdataset(b) = lwdata;
+    lwdataset(c) = lwdata;
 end
 
 % merge epochs
@@ -372,9 +367,9 @@ disp('Averaging...')
 option = struct('operation', 'average', 'suffix', suffix{3}, 'is_save', 1);
 lwdata = FLW_average_epochs.get_lwdata(lwdata ,option);
 
-% update prefix
-prefix = ['sp_filter ' prefix];
-clear suffix s b dataset option lwdataset lwdata lwdata_merged
+% % update prefix
+% prefix = ['sp_filter ' prefix];
+clear suffix c dataset option lwdataset lwdata lwdata_merged
 
 %% average across blocks
 % ----- section input -----
