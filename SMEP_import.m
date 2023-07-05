@@ -20,7 +20,7 @@ clear all; clc;
 
 % dataset
 study = 'SMEP';
-subject = 'S03';
+subject = 'S04';
 block = [1:15];
 
 % choose relevant directories
@@ -88,7 +88,7 @@ for f = 1:length(folders)
     header.name = [subject ' ' prefix{2} ' b' num2str(block(f))];
     CLW_save([], header, data);
 end
-clear prefix folder_input folders f d labels header data header_all data_all
+clear prefix folder_input folders i f d labels header data header_all data_all
 
 %% import MEP data
 % define prefix
@@ -98,7 +98,7 @@ prefix = {'MEP'};
 folder_input = uigetdir(pwd, 'Coose the input folder');
 
 % import the datasets 
-for b = 5%block
+for b = block
     % display current block
     disp([subject  ' - block ' num2str(b)])
     

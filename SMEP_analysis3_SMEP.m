@@ -1,4 +1,4 @@
-%% SPINAL MEP PRE-PROCESSING & ANALYSIS
+%% SMEP - SCRIPT 3: SMEP preprocessing & analysis
 % written by Dominika for the SMEP project (2023)
 % 
 % The SMEP project explores the recording of spinal motor evoked potentials
