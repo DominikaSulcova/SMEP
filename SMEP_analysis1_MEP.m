@@ -39,13 +39,28 @@
 %       - merges epochs into three condition datasets 
 % 
 % 5) DISCARD TRIALS WITH EXCESSIVE BASELINE ACTIVITY
-%       - 
+%       - loops through each dataset, in one loop:
+%           1 - calculates average RMS of the baseline  
+%           2 - discards all epochs that have baseline RMS larger than 
+%               average RMS + <allow_sd> * sd
+%        	3 - in case that there are discarded epochs --> next cycle
+%       - discards all epochs that at any point depass <threshold> value 
+%       - saves new dataset --> 'visual' 
+%       - outputs a summary figure for each dataset 
+% 
+% 6) CALCULATE PEAK-TO-PEAK AMPLITUDE, IDENTIFY ZERO-RESPONSE TRIALS
+%       - calculates the amplitude for each epoch (saved to output struct)
+%       - identifies zero epochs - p2p amplitude < 2 * <threshold>
+%       - filters the datsets and saves them --> 'zero_filtered' :
+%           - zero-response trials are removed in M1 datasets 
+%           - trials with supra-threshold activity anywhere post stimulus
+%           are removed from the CTRL dataset
 
 %% PARAMETERS
 clear all; clc;
 
 % subject
-subject = 4;
+subject = 1;
 if subject < 10
    subj = ['0' num2str(subject)];
 else
@@ -58,7 +73,7 @@ block = [1:15];
 condition = {'M1_single', 'M1_paired', 'CTRL'}; 
 
 % choose relevant directories
-folder_toolbox = uigetdir(pwd, 'Choose the toolbox folder');        % letswave masterfiles
+folder_toolbox = uigetdir(pwd, 'Choose the toolbox folder');        % letswave + eeglab masterfiles
 folder_data = uigetdir(pwd, 'Choose the data folder');              % processed data
 folder_output = uigetdir(pwd, 'Choose the OneDrive folder');        % output folder --> figures, logfiles, output .mat file
 
@@ -167,7 +182,7 @@ clear suffix epoch eventcode b s data header h
 
 %% 3) REMOVE MISSED OR FAULTY TRIALS
 % ----- section input -----
-missed = {14, [73]}; 
+missed = {[11], [44]}; 
 % -------------------------
 % add letswave 7 to the top of search path
 addpath(genpath([folder_toolbox '\letswave7-master']));
@@ -177,7 +192,7 @@ SMEP.MEP(subject).ID = subject;
 SMEP.MEP(subject).missed_epochs = missed;
 
 % discard missing/faulty epochs if necessary
-if ~isempty(missed)
+if length(missed{1}) > 0
     fprintf('discarding missed/faulty epochs...\n')
     
     % cycle through blocks containing missing trials
@@ -208,6 +223,7 @@ if ~isempty(missed)
     
     % encode to the logfile 
     logfile_entry('missed', filename, 'missed_epochs', missed);
+    fprintf('done.\n')
 else    
     % encode to the logfile 
     logfile_entry('missednot', filename);

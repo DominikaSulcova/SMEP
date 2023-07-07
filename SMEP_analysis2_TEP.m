@@ -18,9 +18,9 @@
 %   a .txt logfile and saved to the shared folder
 % - output variables are gathered in an output structure 'SMEP.mat'
 % - when the manual input is needed (ICA, visual inspection), the process
-%   is performed in the letswave GUI, then the corresponding section of the
+%   is performed in the GUI, then the corresponding section of the
 %   script takes care of the logfile update and encodes the output
-%   parameters in a structure 'AGSICI_info'
+%   parameters to the ouput structure
 % 
 % 1) PREPROCESSING
 %       - assign electrode coordinates
@@ -51,21 +51,28 @@
 %% PARAMETERS
 clear all; clc;
 
-% dataset
-measure = 'TEP';
+% subject
 subject = 4;
-block = [1:15];
-condition = {'M1_single', 'M1_paired', 'CTRL'}; 
-
-% identify subject
 if subject < 10
    subj = ['0' num2str(subject)];
 else
    subj = num2str(subject); 
 end
 
+% dataset
+measure = 'TEP';
+block = [1:15];
+condition = {'M1_single', 'M1_paired', 'CTRL'}; 
+
+% load output structure 
+load([folder_output '\SMEP.mat']);
+
+% create logfile filename, launch the TEP section
+filename = sprintf('%s\\Logfiles\\SMEP S%s %s.txt', folder_output, subj, SMEP.info(subject).date); 
+logfile_entry('heading', filename);
+
 % choose relevant directories
-folder_toolbox = uigetdir(pwd, 'Choose the toolbox folder');        % letswave masterfiles
+folder_toolbox = uigetdir(pwd, 'Choose the toolbox folder');        % letswave + eeglab masterfiles
 folder_data = uigetdir(pwd, 'Choose the data folder');              % processed data
 folder_output = uigetdir(pwd, 'Choose the OneDrive folder');        % output folder --> figures, logfiles, output .mat file
 
@@ -76,46 +83,6 @@ soundwave = y; clear y Fs
 
 % visualization
 fig_counter = 1;
-
-%% 1) SUBJECT INFORMATION 
-% load if available
-if exist([folder_output '\SMEP.mat']) > 0 
-    load([folder_output '\SMEP.mat']);
-end
-
-% ask for subject information
-prompt = {'Age:', 'Sex:', 'Handedness:'};
-dlgtitle = sprintf('Subject %d: personal information', subject);
-dims = [1 25];
-definput = {'25', 'Female', 'Right'};
-info = inputdlg(prompt, dlgtitle, dims, definput);
-clear prompt dlgtitle dims definput
-
-% encode subject information to the output structure
-SMEP.info(subject).ID = subject;
-SMEP.info(subject).age = str2num(info{1});
-SMEP.info(subject).sex = info{2};
-SMEP.info(subject).handedness = info{3};
-
-% ask for session information
-prompt = {'Date:', 'Start:', 'End:', 'rMT:', 'Motor hotspot:', 'Control site:'};
-dlgtitle = sprintf('Subject %d: session information', subject);
-dims = [1 25];
-definput = {'00/00/2023', '9:00', '13:00', '50', '00', '00'};
-info = inputdlg(prompt, dlgtitle, dims, definput);
-clear prompt dlgtitle dims definput
-
-% encode session information to the output structure
-SMEP.info(subject).date = info{1};
-SMEP.info(subject).start = info{2};
-SMEP.info(subject).end = info{3};
-SMEP.info(subject).rMT = str2num(info{4});
-SMEP.info(subject).M1 = str2num(info{5});
-SMEP.info(subject).CTRL = str2num(info{6});
-
-% save the output structure
-save([folder_output '\SMEP.mat']);
-clear info
 
 %% 2) PREPROCESSING
 % ----- section input -----
@@ -355,6 +322,23 @@ EEG = pop_tesa_sspsir(EEG, 'artScale', 'manual', 'timeRange', [0,12], 'PC', []);
 figure; 
 pop_timtopo(EEG, [-100  300], [15  30  45  60 100 180], 'Data after SSP-SIR');
 
-
+%% FUNCTIONS
+function logfile_entry(entry, filename, varargin)
+    switch entry
+        case 'heading'
+            fileID = fopen(filename, 'a');
+            fprintf(fileID, '\r\n');
+            fprintf(fileID, '\r\n');
+            fprintf(fileID, '------------------------------------------------------------------------------------------------------\r\n');
+            fprintf(fileID, 'TMS-EVOKED POTENTIALS\r\n');
+            fprintf(fileID, '------------------------------------------------------------------------------------------------------\r\n');
+            fprintf(fileID, '1	dataset imported using matlab script ''SMEP_import.m''\r\n');
+            fprintf(fileID, '		- BIN data loaded from NeurOne output\r\n');
+            fprintf(fileID, '		- 30 scalp channels (no mastoids) + 3 ECG channels\r\n');
+            fprintf(fileID, '		- only ''Stimulation'' category kept\r\n');
+            fprintf(fileID, '\r\n');
+            fclose(fileID);
+    end
+end
 
 
