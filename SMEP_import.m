@@ -20,8 +20,8 @@ clear all; clc;
 
 % dataset
 study = 'SMEP';
-subject = 'S04';
-block = [1:15];
+subject = 'S05';
+block = [15];
 
 % choose relevant directories
 folder_lw = uigetdir(pwd, 'Choose the letswave folder');        % letswave masterfiles 
@@ -30,6 +30,52 @@ cd(folder_output)
 
 % add letswave 6 to the top of search path
 addpath(genpath([folder_lw '\letswave6-master']));
+
+%% import MEP data
+% define prefix
+prefix = {'MEP'};
+
+% choose the folder with raw data
+folder_input = uigetdir(pwd, 'Coose the input folder');
+
+% import the datasets 
+for b = block
+    % display current block
+    disp([subject  ' - block ' num2str(b)])
+    
+    % import data
+    [header, data] = EMG_import_VHDR([folder_input '\' study ' ' subject ' b' num2str(b) '.vhdr']);
+    
+    % keep only 's1' events
+    disp('Reducing number of event categories...')
+    for i = 1:length(header.events)
+        if strcmp(header.events(i).code, 's1')
+            index(i) = true;
+        else
+            index(i) = false;
+        end
+    end
+    header.events = header.events(index);
+    fprintf('%d events found in the dataset.', length(header.events))
+    clear index
+    
+    % discard duplicates if necessary
+    if length(header.events) > 80
+        fprintf('Removing duplicate triggers...')
+        for a = 1:length(header.events)
+            latencies(a) = header.events(a).latency;
+        end
+        [~, index] = unique(latencies, 'stable');
+        header.events = header.events(index);
+        fprintf('%d unique events found in the dataset.', length(header.events))        
+    end
+    clear index latencies
+    
+    % save for letswave
+    header.name = [subject ' ' prefix{1} ' b' num2str(b)];
+    CLW_save([], header, data);
+end
+clear prefix folder_input a b i data header
 
 %% import NeurOne data
 % define prefix
@@ -90,50 +136,6 @@ for f = 1:length(folders)
 end
 clear prefix folder_input folders i f d labels header data header_all data_all
 
-%% import MEP data
-% define prefix
-prefix = {'MEP'};
 
-% choose the folder with raw data
-folder_input = uigetdir(pwd, 'Coose the input folder');
-
-% import the datasets 
-for b = block
-    % display current block
-    disp([subject  ' - block ' num2str(b)])
-    
-    % import data
-    [header, data] = EMG_import_VHDR([folder_input '\' study ' ' subject ' b' num2str(b) '.vhdr']);
-    
-    % keep only 's1' events
-    disp('Reducing number of event categories...')
-    for i = 1:length(header.events)
-        if strcmp(header.events(i).code, 's1')
-            index(i) = true;
-        else
-            index(i) = false;
-        end
-    end
-    header.events = header.events(index);
-    fprintf('%d events found in the dataset.', length(header.events))
-    clear index
-    
-    % discard duplicates if necessary
-    if length(header.events) > 80
-        fprintf('Removing duplicate triggers...')
-        for a = 1:length(header.events)
-            latencies(a) = header.events(a).latency;
-        end
-        [~, index] = unique(latencies, 'stable');
-        header.events = header.events(index);
-        fprintf('%d unique events found in the dataset.', length(header.events))        
-    end
-    clear index latencies
-    
-    % save for letswave
-    header.name = [subject ' ' prefix{1} ' b' num2str(b)];
-    CLW_save([], header, data);
-end
-clear prefix folder_input a b i data header
 
 

@@ -39,22 +39,23 @@
 %       - merges epochs into three condition datasets 
 % 
 % 5) DISCARD TRIALS WITH EXCESSIVE BASELINE ACTIVITY
+%       - 
 
 %% PARAMETERS
 clear all; clc;
 
-% dataset
-measure = 'MEP';
+% subject
 subject = 4;
-block = [1:15];
-condition = {'M1_single', 'M1_paired', 'CTRL'}; 
-
-% identify subject
 if subject < 10
    subj = ['0' num2str(subject)];
 else
    subj = num2str(subject); 
 end
+
+% dataset
+measure = 'MEP';
+block = [1:15];
+condition = {'M1_single', 'M1_paired', 'CTRL'}; 
 
 % choose relevant directories
 folder_toolbox = uigetdir(pwd, 'Choose the toolbox folder');        % letswave masterfiles
@@ -77,7 +78,7 @@ end
 
 % ask for subject information
 prompt = {'Age:', 'Sex:', 'Handedness:'};
-dlgtitle = sprintf('Subject %d: personal information', subject);
+dlgtitle = 'personal information';
 dims = [1 25];
 definput = {'25', 'female', 'right'};
 info = inputdlg(prompt, dlgtitle, dims, definput);
@@ -91,7 +92,7 @@ SMEP.info(subject).handedness = info{3};
 
 % ask for session information
 prompt = {'Date:', 'Start:', 'End:', 'rMT:', 'Motor hotspot:', 'Control site:'};
-dlgtitle = sprintf('Subject %d: session information', subject);
+dlgtitle = 'session information';
 dims = [1 25];
 definput = {'00002023', '9:00', '13:00', '50', '00', '00'};
 info = inputdlg(prompt, dlgtitle, dims, definput);
@@ -137,6 +138,11 @@ for b = block
     % remove DC and apply linear detrend
     fprintf('removing DC + detrending...')
     [header, data, ~] = RLW_dc_removal(header, data, 'linear_detrend', 1);
+    
+    % add the global event tag
+    for h = 1:length(header.events)
+        header.global_tags(h, :) = [b, h];
+    end
 
     % save for letswave 
     fprintf('done.\n')
@@ -146,7 +152,7 @@ for b = block
     CLW_save([], header, data);
 end
 
-create prefix
+% create prefix
 for s = 1:length(suffix)
     if s == 1
         prefix = suffix{s};
@@ -157,14 +163,11 @@ end
 
 % update logfile
 logfile_entry('preprocessing', filename);
-clear suffix epoch eventcode b s data header
+clear suffix epoch eventcode b s data header h
 
 %% 3) REMOVE MISSED OR FAULTY TRIALS
 % ----- section input -----
-missed = {1, [1];...
-        9, [7]; ...
-        11, [1:80]; ... 
-        12, [1:29]}; 
+missed = {14, [73]}; 
 % -------------------------
 % add letswave 7 to the top of search path
 addpath(genpath([folder_toolbox '\letswave7-master']));
@@ -194,6 +197,9 @@ if ~isempty(missed)
                 epochs2keep{e} = num2str(epochs(e));
             end
         end
+        
+        % update global tags
+        lwdata.header.global_tags = lwdata.header.global_tags(epochs, :);
 
         % discard indicated epochs 
         option = struct('type', 'epoch', 'items', {epochs2keep}, 'suffix', '', 'is_save', 1);
@@ -221,6 +227,7 @@ load([folder_output '\TMS stimulation protocols\SMEP_' subj '_stim_order.mat'])
 % label and cluster by condition
 fprintf('parsing per condition...\n')
 counter = 1;
+global_tags = {[], [], []};
 for b = block
     % get the dataset
     option = struct('filename', sprintf('%s S%s %s b%d.lw6', prefix, subj, measure, b));
@@ -237,6 +244,9 @@ for b = block
             % rename & save into a dataset for merging
             lwdata.header.name = sprintf('S%s %s', subj, measure);
             data2merge(c, counter) = lwdata;
+            
+            % append to global tag variable
+            global_tags{c} = cat(1, global_tags{c}, lwdata.header.global_tags);
         end
     end
     
@@ -262,21 +272,40 @@ for c = 1:length(condition)
     lwdata = FLW_merge.get_lwdata(lwdataset, option); 
 end
 fprintf('done.\n')
-clear b c e option lwdata folder_input stim_order data2merge counter lwdataset 
+
+% update global tags  
+addpath(genpath([folder_toolbox '\letswave6-master']));
+for c = 1:length(condition)
+    % load header
+    [header, data] = CLW_load(sprintf('%s S%s %s', condition{c}, subj, measure)); 
+    
+    % replace global tags, if the lengths match
+    if header.datasize(1) == length(global_tags{c})
+        header.global_tags = global_tags{c};
+        CLW_save([], header, data);
+    else
+        error('Error: number of found epochs does not match the length of the global tags file!')
+    end
+end
+
+% encode to the logfile 
+logfile_entry('merged', filename); 
+clear b c e option lwdata folder_input stim_order data2merge counter lwdataset header data global_tags
 
 %% 5) DISCARD TRIALS WITH EXCESSIVE BASELINE ACTIVITY
 % ----- section input -----
 prefix = 'visual';
 baseline = [-0.2 0];
-threshold = 15;
 allow_sd = 3;
+threshold = 15;
 % -------------------------
 % add letswave 6 to the top of search path
 addpath(genpath([folder_toolbox '\letswave6-master']));
 
 % loop through conditions
+fprintf('removing epochs of extensive baseline activity:\n')
 for c = 1:length(condition)                              
-    fprintf('condition: %s\n', condition{c})
+    fprintf('%s ... ', condition{c})
     
     % load data and header
     [header, data] = CLW_load(sprintf('%s S%s %s', condition{c}, subj, measure));   
@@ -284,6 +313,9 @@ for c = 1:length(condition)
     % prepare variables 
     x = baseline(1) : header.xstep : 0; 
     data_visual = squeeze(data(:, 1, 1, 1, 1, ceil((baseline(1) - header.xstart) / header.xstep) : floor((baseline(2) - header.xstart) / header.xstep)));
+    for d = 1:size(data_visual, 1)
+        data_visual(d, :) = detrend(data_visual(d, :));
+    end
     data_visual_orig = data_visual;
     discarded = [];
 
@@ -310,14 +342,14 @@ for c = 1:length(condition)
         % loop through trials
         for e = 1:length(header.events)
             % check if the rms of current event fits into the limis 
-                current_rms = rms(data_visual(e, :)');
-                if current_rms > cutoff
-                    discarded_pos = [discarded_pos e];
-                    discarded = [discarded header.events(e).epoch];
-                    ditch = true;
-                else
-                    ditch = false;
-                end                        
+            current_rms = rms(data_visual(e, :)');
+            if current_rms > cutoff
+                discarded_pos = [discarded_pos e];
+                discarded = [discarded header.events(e).epoch];
+                ditch = true;
+            else
+                ditch = false;
+            end                        
 
             % plot the event to the appropriate axes                
             if ditch   
@@ -455,6 +487,7 @@ for c = 1:length(condition)
         header.events(h).epoch = h;
     end
     header.name = [prefix ' ' header.name];
+    header.global_tags(discarded, :) = [];
     save([header.name '.lw6'], 'header')         
 
     % modify and save data
@@ -465,6 +498,7 @@ for c = 1:length(condition)
     SMEP.MEP(subject).baseline_discarded{c} = sort(discarded);
     SMEP.MEP(subject).baseline_cycles(c) = cycle - 1;
     SMEP.MEP(subject).baseline_threshold = threshold;
+    SMEP.MEP(subject).baseline_kept(c) = size(data, 1);
 
     % save the output structure
     save([folder_output '\SMEP.mat'], 'SMEP');
@@ -478,10 +512,92 @@ for c = 1:length(condition)
     % update the counter
     fig_counter = fig_counter + 1;
 end
+fprintf('done.\n')
+    
+% update the logfile
+logfile_entry('baseline', filename, 'bl_interval', baseline, 'output', SMEP.MEP(subject))
 
-%% update the logfile
-logfile_entry('baseline', filename)
-clear baseline threshold allow_sd c header data data_visual x 
+% save the output structure
+save([folder_output '\SMEP.mat'], 'SMEP');
+clear baseline threshold allow_sd c header data ...
+    data_visual data_visual_orig x discarded discarded_pos avg_rms avg_sd current_max current_rms cutoff cycle ditch ...
+    d h e fig figure_name final_rms go h l xlim  
+
+%% 6) CALCULATE PEAK-TO-PEAK AMPLITUDE, IDENTIFY ZERO-RESPONSE TRIALS
+% ----- section input -----
+suffix = 'zero_filtered';
+response_window = {[0.015 0.05], [0.015 0.05], [0.015 0.3]};
+threshold = 15;
+% -------------------------
+% add letswave 6 to the top of search path
+addpath(genpath([folder_toolbox '\letswave6-master']));
+
+% loop through conditions
+fprintf('identifyin zero-response trials:\n')
+for c = 1:length(condition) 
+    fprintf(' %s ... ', condition{c})    
+    % load data and header
+    [header, data] = CLW_load(sprintf('%s %s S%s %s', prefix, condition{c}, subj, measure));   
+
+    % choose the window
+    x_start = floor((response_window{c}(1) - header.xstart)/header.xstep);
+    x_end = floor((response_window{c}(2) - header.xstart)/header.xstep);
+
+    % extract p2p amplitude
+    y_max = []; y_min = [];
+    for e = 1:size(data, 1)                    
+        % identify extremes
+        y_max(e) = max(squeeze(data(e, 1, 1, 1, 1, x_start:x_end)));
+        y_min(e) = min(squeeze(data(e, 1, 1, 1, 1, x_start:x_end)));
+
+        % calculate amplitude 
+        SMEP.MEP(subject).amplitude{c}(e) = y_max(e) - y_min(e); 
+    end                
+
+    % identify zero response epochs     
+    discarded = [];
+    for e = 1:length(SMEP.MEP(subject).amplitude{c})
+        if SMEP.MEP(subject).amplitude{c}(e) <= 2 * threshold
+            if c == 3;
+                index(e) = true;
+            else
+                discarded(end + 1) = e;
+                index(e) = false;
+            end
+        else
+            if c == 3;
+                discarded(end + 1) = e;
+                index(e) = false;
+            else
+                index(e) = true;
+            end
+        end
+    end
+
+    % filter the data and save
+    data = data(index, :, :, :, :, :);
+    save([suffix ' ' header.name '.mat'], 'data')
+    
+    % encode zero-response trials to the output structure
+    SMEP.MEP(subject).zero_discarded{c} = discarded;
+    SMEP.MEP(subject).zero_kept(c) = size(data, 1);
+
+    % adjust header and save 
+    header.name = [suffix ' ' header.name];
+    header.datasize(1) = size(data, 1);
+    header.events = header.events(1:header.datasize(1))';
+    header.global_tags(discarded, :) = [];
+    save([header.name '.lw6'], 'header') 
+    clear index
+end 
+fprintf('done.\n')
+
+% update the logfile
+logfile_entry('zero-response', filename, 'output', SMEP.MEP(subject))
+
+% save the output structure
+save([folder_output '\SMEP.mat'], 'SMEP');
+clear suffix response_window threshold c x_start x_end e y_max y_min index discarded data header
 
 %% FUNCTIONS
 function  initialize_logfile(SMEP, subject, filename)
@@ -576,70 +692,64 @@ function logfile_entry(entry, filename, varargin)
             fprintf(fileID, '3	no epochs were marked as missed or faulty\r\n');
             fprintf(fileID, '\r\n');
             fclose(fileID);
-
-        case 'ICA 1'
-            if ~isempty(varargin)
-                a = find(strcmpi(varargin, 'components'));
-                if ~isempty(a)
-                    components = varargin{a + 1};
-                end
+            
+        case 'merged'
+            fileID = fopen(filename, 'a');
+            fprintf(fileID, '4	data were labelled and split to three datasets according to the condition\r\n');
+            fprintf(fileID, '\r\n');
+            fclose(fileID);
+            
+        case 'baseline'
+            a = find(strcmpi(varargin, 'bl_interval'));
+            if ~isempty(a)
+                baseline = varargin{a + 1};
+            else
+                baseline = [-0.2, 0];
             end
-            
-            fileID = fopen(filename, 'a');
-            fprintf(fileID, '4	preliminary ICA was computed to get rid of the major decay artifact\r\n');
-            fprintf(fileID, '		- squared matrix --> 32 ICs\r\n');
-            fprintf(fileID, '		- removed component(s): IC %s\r\n', num2str(components));
-            fprintf(fileID, '	--> file prefix: sp_filter prea\r\n');
-            fprintf(fileID, '\r\n');
-            fclose(fileID);
-            
-        case 'block 2'
-            fileID = fopen(filename, 'a');
-            fprintf(fileID, '5	frequency filters applied\r\n');
-            fprintf(fileID, '		- FFT notch filter --> 50 Hz, width 2 + slope 2\r\n');
-            fprintf(fileID, '		- Butterworth bandpass filter --> [0.1 80]Hz, 4th order\r\n');
-            fprintf(fileID, '	--> file prefix: bandpass notch\r\n');
-            fprintf(fileID, '\r\n');
-            fprintf(fileID, '6 	signal cropped to get rid of edge artifacts\r\n');
-            fprintf(fileID, '		- [-0.75 0.75]s\r\n');
-            fprintf(fileID, '	--> file prefix: crop\r\n');
-            fprintf(fileID, '\r\n');
-            fclose(fileID);
-            
-        case 'visual'
-            if ~isempty(varargin)
-                e = find(strcmpi(varargin, 'epochs'));
-                if ~isempty(e)
-                    epochs = varargin{e + 1};
-                end
-                
-                n = find(strcmpi(varargin, 'epochs_n'));
-                if ~isempty(n)
-                    epochs_n = varargin{n + 1};
-                end
+            b = find(strcmpi(varargin, 'output'));
+            if ~isempty(b)
+                output = varargin{b + 1};
+            else
+                error('Error: no output structure was assigned!')
             end
-            
             fileID = fopen(filename, 'a');
-            fprintf(fileID, '7	noisy epochs were removed based on visual inspection\r\n');
-            fprintf(fileID, '		- spTMS TS: %s --> %d epochs retained\r\n', num2str(epochs(1, epochs(1, :) > 0)), epochs_n(1));
-            fprintf(fileID, '		- spTMS CS1: %s --> %d epochs retained\r\n', num2str(epochs(2, epochs(2, :) > 0)), epochs_n(2));
-            fprintf(fileID, '		- spTMS CS2: %s --> %d epochs retained\r\n', num2str(epochs(3, epochs(3, :) > 0)), epochs_n(3));
-            fprintf(fileID, '		- spTMS CS3: %s --> %d epochs retained\r\n', num2str(epochs(4, epochs(4, :) > 0)), epochs_n(4));
-            fprintf(fileID, '		- ppTMS CS1: %s --> %d epochs retained\r\n', num2str(epochs(5, epochs(5, :) > 0)), epochs_n(5));
-            fprintf(fileID, '		- ppTMS CS2: %s --> %d epochs retained\r\n', num2str(epochs(6, epochs(6, :) > 0)), epochs_n(6));
-            fprintf(fileID, '		- ppTMS CS3: %s --> %d epochs retained\r\n', num2str(epochs(7, epochs(7, :) > 0)), epochs_n(7));
-            fprintf(fileID, '	--> file prefix: visual\r\n');
+            fprintf(fileID, sprintf('5	epochs with muscular activity at the baseline ([%.1f, %.1f]s before the stimulus) were identified\r\n', baseline(1), baseline(2)));
+            fprintf(fileID, ' 	and discarded using an automated procedure:\r\n');
+            fprintf(fileID, '       - all epochs with RMS of the amplitude at the baseline larger than average baseline RMS + 3SD \r\n');
+            fprintf(fileID, '         were discarded and the cycle was repeated until there were no epochs identified\r\n');
+            fprintf(fileID, sprintf('       - additionally, threshold of %d microV was applied to remove noisy trials\r\n', output.baseline_threshold));
+            fprintf(fileID, '       - output figure was saved to the Figures folder\r\n');
+            fprintf(fileID, ' 	final number of epochs:\r\n');
+            fprintf(fileID, sprintf('           - M1 single:    %d epochs kept (%d cycles)\r\n', output.baseline_kept(1), output.baseline_cycles(1)));
+            fprintf(fileID, sprintf('                           epochs removed: %s\r\n', num2str(output.baseline_discarded{1})));
+            fprintf(fileID, sprintf('           - M1 paired:    %d epochs kept (%d cycles)\r\n', output.baseline_kept(2), output.baseline_cycles(2)));
+            fprintf(fileID, sprintf('                           epochs removed: %s\r\n', num2str(output.baseline_discarded{2})));
+            fprintf(fileID, sprintf('           - CTRL:     %d epochs kept (%d cycles)\r\n', output.baseline_kept(3), output.baseline_cycles(3)));
+            fprintf(fileID, sprintf('                       epochs removed: %s\r\n', num2str(output.baseline_discarded{3})));
             fprintf(fileID, '\r\n');
             fclose(fileID);
             
-        case 'block 3'
+        case 'zero-response'
+            a = find(strcmpi(varargin, 'output'));
+            if ~isempty(a)
+                output = varargin{a + 1};
+            else
+                error('Error: no output structure was assigned!')
+            end
             fileID = fopen(filename, 'a');
-            fprintf(fileID, '9  baseline corrected - subtracted mean of [-0.2 -0.005]s\r\n');
-            fprintf(fileID, '   --> file prefix: bl_correct\r\n');
-            fprintf(fileID, '\r\n');
-            fprintf(fileID, '10 signal averaged across epochs\r\n');
-            fprintf(fileID, '   --> file prefix: avg\r\n');
+            fprintf(fileID, '6	peak-to-peak MEP amplitude was extracted within the time window [0.015 0.05]s and saved to the output structure');
+            fprintf(fileID, '\r\n');            
+            fprintf(fileID, sprintf('	epochs with MEP peak-to-peak amplitude smaller than %d microV were identified as zero-response trials\r\n', output.baseline_threshold*2));            
+            fprintf(fileID, ' 	and discarded in M1 conditions - in CTRL condition, epochs with larger aplitude any time past stimulus were discarded\r\n');
+            fprintf(fileID, ' 	final number of epochs:\r\n');
+            fprintf(fileID, sprintf('           - M1 single:    %d epochs kept\r\n', output.zero_kept(1)));
+            fprintf(fileID, sprintf('                           epochs removed: %s\r\n', num2str(output.zero_discarded{1})));
+            fprintf(fileID, sprintf('           - M1 paired:    %d epochs kept\r\n', output.zero_kept(2)));
+            fprintf(fileID, sprintf('                           epochs removed: %s\r\n', num2str(output.zero_discarded{2})));
+            fprintf(fileID, sprintf('           - CTRL:     %d epochs kept\r\n', output.zero_kept(3)));
+            fprintf(fileID, sprintf('                       epochs removed: %s\r\n', num2str(output.zero_discarded{3})));
             fprintf(fileID, '\r\n');
             fclose(fileID);
+  
     end
 end
