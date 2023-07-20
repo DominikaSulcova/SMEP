@@ -27,25 +27,34 @@
 %       - re-reference to common average
 %       - epoch around the event [-1 2]s
 %       - remove the DC shift and linearly detrend
-%       - interpolate the TMS artifact [-0.005 0.002]s
+%       - interpolate the TMS artifact [-0.006 0.003]s
 %       - downsample to 2kHz (1/10)
-%       - baseine correct by mean subtraction [-250 0.005]
+%       - baseine correct by mean subtraction [-0.25 -0.006]s
 %       - remove extra event categories
+%       - adds global tags to all trials
 % 
-% 2) PARSE PER CONDITION
+% 2) REMOVE MISSED OR FAULTY TRIALS
+%       - requires manual input of missed trials: a cell 'missed' 
+%           - first column indicates block number
+%           - second column contains a vector of indexes of missed trials
 % 
-% 3) EXPORT FOR EEGLAB
+% 3) PARSE PER CONDITION
+%       - loads the stimulation order (needs to be in the data folder!)
+%       - labels the epochs with appropriate eventcodes
+%       - merges epochs into three condition datasets 
 % 
-% 4) LAUNCH EEGLAB
+% 4) EXPORT FOR EEGLAB
+%       - saves as .set file
 % 
-% 5) LOAD DATA TO EEGLAB
+% 5) LAUNCH EEGLAB
 % 
-% 6) REMOVE BAD CHANNELS & TRIALS
+% 6) REMOVE MUSCULAR ARTIFACT - SSP-SIR
 % 
 % 7) ICA
-%       - ocular artifacts 
-%       - TMS-independent muscular activity
-%       - electrode noise
+%       - removes artifact not timelocked to the stimulus:
+%           - ocular artifacts 
+%           - TMS-independent muscular activity
+%           - electrode noise
 
 
 %% PARAMETERS
@@ -64,17 +73,17 @@ measure = 'TEP';
 block = [1:15];
 condition = {'M1_single', 'M1_paired', 'CTRL'}; 
 
+% choose relevant directories
+folder_toolbox = uigetdir(pwd, 'Choose the toolbox folder');        % letswave + eeglab masterfiles
+folder_data = uigetdir(pwd, 'Choose the data folder');              % processed data
+folder_output = uigetdir(pwd, 'Choose the OneDrive folder');        % output folder --> figures, logfiles, output .mat file
+
 % load output structure 
 load([folder_output '\SMEP.mat']);
 
 % create logfile filename, launch the TEP section
 filename = sprintf('%s\\Logfiles\\SMEP S%s %s.txt', folder_output, subj, SMEP.info(subject).date); 
 logfile_entry('heading', filename);
-
-% choose relevant directories
-folder_toolbox = uigetdir(pwd, 'Choose the toolbox folder');        % letswave + eeglab masterfiles
-folder_data = uigetdir(pwd, 'Choose the data folder');              % processed data
-folder_output = uigetdir(pwd, 'Choose the OneDrive folder');        % output folder --> figures, logfiles, output .mat file
 
 % load the finish sound
 % load handel
@@ -84,14 +93,14 @@ soundwave = y; clear y Fs
 % visualization
 fig_counter = 1;
 
-%% 2) PREPROCESSING
+%% 1) PREPROCESSING
 % ----- section input -----
 suffix = {'reref' 'ep' 'dc' 'interp' 'ds' 'bl'};
-epoch = [-1 2];
-interp = [-0.005 0.002];
-ds_ratio = 10;
-baseline = [-0.25 -0.005];
 eventcode = 'Stimulation';
+param.epoch = [-1 2];
+param.interp = [-0.006 0.003];
+param.ds_ratio = 10;
+param.baseline = [-0.25 -0.006];
 % ------------------------- 
 % add letswave 6 to the top of search path
 addpath(genpath([folder_toolbox '\letswave6-master']));
@@ -127,6 +136,11 @@ for b = block
     % baseline correct
     fprintf('subtracting baseline...')
     [header, data, ~] = RLW_baseline(header, data, 'operation', 'subtract', 'xstart', baseline(1), 'xend', baseline(2));
+    
+    % add the global event tag
+    for h = 1:length(header.events)
+        header.global_tags(h, :) = [b, h];
+    end
 
     % save for letswave 
     fprintf('done.\n')
@@ -134,15 +148,6 @@ for b = block
         header.name = [suffix{s} ' ' header.name];
     end
     CLW_save([], header, data);
-end
-
-% create prefix
-for s = 1:length(suffix)
-    if s == 1
-        prefix = suffix{s};
-    else
-        prefix = [suffix{s} ' ' prefix];
-    end
 end
 
 % add letswave 7 to the top of search path
@@ -162,6 +167,9 @@ for b = block
 end
 fprintf('done.\n')
 
+% encode to the logfile 
+logfile_entry('preprocessing', filename, 'parameters', param);
+
 % create prefix
 for s = 1:length(suffix)
     if s == 1
@@ -170,7 +178,59 @@ for s = 1:length(suffix)
         prefix = [suffix{s} ' ' prefix];
     end
 end
-clear suffix epoch interp ds_ratio baseline eventcode b s data header lwdata option
+clear suffix eventcode param b s data header lwdata option
+
+%% 2) REMOVE MISSED OR FAULTY TRIALS
+% ----- section input -----
+missed = {[1], [1];
+    [9], [7];
+    [11], [1:80];
+    [12], [1:29]}; 
+% -------------------------
+% add letswave 7 to the top of search path
+addpath(genpath([folder_toolbox '\letswave7-master']));
+
+% discard missing/faulty epochs if necessary
+if length(missed{1}) > 0
+    fprintf('discarding missed/faulty epochs...\n')
+    
+    % cycle through blocks containing missing trials
+    for b = 1:size(missed, 1)
+        % load the dataset
+        option = struct('filename', sprintf('%s S%s %s b%d', prefix, subj, measure, missed{b, 1}));
+        lwdata = FLW_load.get_lwdata(option);
+
+        % identify epochs to keep
+        epochs2keep = {};
+        epochs = 1:size(lwdata.data, 1);
+        epochs = epochs(~ismember(epochs, missed{b, 2}));
+        if isempty(epochs)
+            continue
+        else
+            for e = 1:length(epochs)
+                epochs2keep{e} = num2str(epochs(e));
+            end
+        end
+        
+        % update global tags
+        lwdata.header.global_tags = lwdata.header.global_tags(epochs, :);
+
+        % discard indicated epochs 
+        option = struct('type', 'epoch', 'items', {epochs2keep}, 'suffix', '', 'is_save', 1);
+        lwdata = FLW_selection.get_lwdata(lwdata, option);    
+    end
+    
+    % encode to the logfile 
+    logfile_entry('missed', filename, 'missed_epochs', missed);
+    fprintf('done.\n')
+else    
+    % encode to the logfile 
+    logfile_entry('missednot', filename);
+end
+
+% save the output structure
+save([folder_output '\SMEP.mat'], 'SMEP');
+clear missed b option lwdata epochs epochs2keep e
 
 %% 3) PARSE PER CONDITION
 % add letswave 7 to the top of search path
@@ -182,6 +242,7 @@ load([folder_output '\TMS stimulation protocols\SMEP_' subj '_stim_order.mat'])
 % label and cluster by condition
 fprintf('parsing per condition...\n')
 counter = 1;
+global_tags = {[], [], []};
 for b = block
     % get the dataset
     option = struct('filename', sprintf('%s S%s %s b%d.lw6', prefix, subj, measure, b));
@@ -198,6 +259,9 @@ for b = block
             % rename & save into a dataset for merging
             lwdata.header.name = sprintf('S%s %s', subj, measure);
             data2merge(c, counter) = lwdata;
+            
+            % append to global tag variable
+            global_tags{c} = cat(1, global_tags{c}, lwdata.header.global_tags);
         end
     end
     
@@ -212,13 +276,36 @@ fprintf('merging datasets...\n')
 for c = 1:length(condition)
     % subset the dataset
     lwdataset = data2merge(c, :)';
+    
+%     % in case a whole block needs to be removed
+%     if c == 1
+%        lwdataset = lwdataset([1:3, 5]);
+%     end
 
     % merge subjects & save 
     option = struct('type', 'epoch', 'suffix', condition{c}, 'is_save', 1);
     lwdata = FLW_merge.get_lwdata(lwdataset, option); 
 end
 fprintf('done.\n')
-clear b c e option lwdata folder_input stim_order data2merge counter lwdataset 
+
+% update global tags  
+addpath(genpath([folder_toolbox '\letswave6-master']));
+for c = 1:length(condition)
+    % load header
+    [header, data] = CLW_load(sprintf('%s S%s %s', condition{c}, subj, measure)); 
+    
+    % replace global tags, if the lengths match
+    if header.datasize(1) == length(global_tags{c})
+        header.global_tags = global_tags{c};
+        CLW_save([], header, data);
+    else
+        error('Error: number of found epochs does not match the length of the global tags file!')
+    end
+end
+
+% encode to the logfile 
+logfile_entry('merged', filename); 
+clear b c e option lwdata folder_input stim_order data2merge counter lwdataset header data global_tags
 
 %% 4) EXPORT FOR EEGLAB
 % add letswave 7 to the top of search path
@@ -227,6 +314,11 @@ addpath(genpath([folder_toolbox '\letswave7-master']));
 % export in .set format
 fprintf('exporting for EEGLAB...\n')
 for c = 1:length(condition)
+    % load the data
+    option = struct('filename', sprintf('%s S%s %s', condition{c}, subj, measure));
+    lwdata = FLW_load.get_lwdata(option);
+    
+    % export
     FLW_export_EEGLAB.get_lwdata('filename', sprintf('%s S%s %s', condition{c}, subj, measure), 'pathname', pwd);
 end
 fprintf('done.\n')
@@ -240,20 +332,58 @@ addpath(fullfile(folder_toolbox,'eeglab2022.1'));
 addpath(fullfile(folder_toolbox,'FastICA_25'));
 
 % launch eeglab and generate an empty EEGLAB structure
-eeglab
+eeglab 
 
-%% 6) LOAD DATA TO EEGLAB
+%% 6) REMOVE MUSCULAR ARTIFACT - SSP-SIR
 % ----- section input -----
-this_condition = 'M1_single';
+param.time_range = [-0.006, 0.050];
 % ------------------------- 
-% load the dataset
-filename = sprintf('%s S%s %s.set', this_condition, subj, measure);
-EEG = pop_loadset('filename', filename, 'filepath', folder_data);
-eeglab redraw   
+% identify number of opened figures
+h = findobj('type','figure'); 
+if length(h) > 0
+    fig_counter = length(h) + 1;
+end
+clear h
 
-% visual check
-figure; 
-pop_timtopo(EEG, [-100  300], [15  30  45  60 100 180], 'Original data');
+% cycle through conditions
+for c = 1:length(condition)
+    % load the dataset
+    filename = sprintf('%s S%s %s.set', condition{c}, subj, measure);
+    EEG = pop_loadset('filename', filename, 'filepath', folder_data);
+    eeglab redraw   
+    
+    % remove ECG channels 
+    EEG = pop_select(EEG, 'channel', {EEG.chanlocs([1:30]).labels});
+    eeglab redraw
+    
+    % visualize the average response to identify possible bad channels
+    figure(fig_counter); 
+    pop_plottopo(pop_select(EEG, 'time', [-0.1 0.3]), [] , '', 0, 'ydir', 1, 'ylim', [-30 30]);
+    sgtitle(sprintf('S%s - %s: original data', subj, condition{c}))
+    fig_counter = fig_counter + 1;
+    
+    % remove bad channels if necessary
+    
+    % visual check - before SSP-SIR
+    figure(fig_counter); 
+    pop_timtopo(EEG, [-100  300], [5 15  30  45  60 100 180], 'Original data');
+    sgtitle(sprintf('S%s - %s: original data', subj, condition{c}))
+    fig_counter = fig_counter + 1;
+    
+    % SSP-SIR - spherical model 
+    [EEG] = pop_tesa_sspsir(EEG, 'artScale', 'manual', 'timeRange', param.time_range, 'PC', []);
+    [ALLEEG EEG CURRENTSET] = pop_newset(ALLEEG, EEG, 1, 'setname', sprintf('%s S%s %s SSP', condition{c}, subj, measure),...
+        'saveold', sprintf('%s\\%s S%s %s.set', pwd, condition{c}, subj, measure), 'gui', 'off'); 
+    eeglab redraw
+    
+    % visual check - after SSP-SIR
+    figure(fig_counter); 
+    pop_timtopo(EEG, [-100  300], [5 15  30  45  60 100 180], 'Filtered data');
+    sgtitle(sprintf('S%s - %s: filtered data', subj, condition{c}))
+    fig_counter = fig_counter + 1;
+end
+
+clear c filename
 
 %% 7) REMOVE BAD CHANNELS & TRIALS
 % save the original channels locations 
@@ -264,7 +394,8 @@ figure;
 pop_plottopo(pop_select(EEG, 'time', [-0.1 0.3]), [] , '', 0, 'ydir', 1, 'ylim', [-30 30]);
 
 % remove bad channels 
-EEG = pop_select(EEG);
+EEG = pop_select(EEG, 'channel', EEG.chanlocs([1:30]).labels);
+eeglab redraw
 
 % remove bad trials
 pop_eegplot(EEG, 1, 1, 1);
@@ -336,6 +467,46 @@ function logfile_entry(entry, filename, varargin)
             fprintf(fileID, '		- BIN data loaded from NeurOne output\r\n');
             fprintf(fileID, '		- 30 scalp channels (no mastoids) + 3 ECG channels\r\n');
             fprintf(fileID, '		- only ''Stimulation'' category kept\r\n');
+            fprintf(fileID, '\r\n');
+            fclose(fileID);
+            
+        case 'preprocessing'
+            a = find(strcmpi(varargin, 'parameters'));
+            param = varargin{a + 1};
+            fileID = fopen(filename, 'a');
+            fprintf(fileID, 'following processing steps were performed using matlab script ''SMEP_analysis2_TEP.m''\r\n');
+            fprintf(fileID, '\r\n');
+            fprintf(fileID, '2	preprocessing\r\n');
+            fprintf(fileID, '		- default electrode coordinates assigned\r\n');
+            fprintf(fileID, '		- re-referenced to common average\r\n');
+            fprintf(fileID, sprintf('		- segmentation relative to events [%d %d]s\r\n', param.epoch(1), param.epoch(2)));
+            fprintf(fileID, '		- DC shift removal + linear detrend\r\n');
+            fprintf(fileID, sprintf('		- TMS artifact interpolated at [%.3f %.3f]s\r\n', param.interp(1), param.interp(2)));
+            fprintf(fileID, sprintf('		- downsampled to %dkHz (1/%d)\r\n', 20/param.ds_ratio, param.ds_ratio));
+            fprintf(fileID, sprintf('		- baseline corrected by mean subtraction [%.3f %.3f]s\r\n', param.baseline(1), param.baseline(2)));
+            fprintf(fileID, '\r\n');
+            fclose(fileID);
+            
+        case 'missed'
+            a = find(strcmpi(varargin, 'missed_epochs'));
+            missed_epochs = varargin{a + 1};
+            fileID = fopen(filename, 'a');
+            fprintf(fileID, '3	missed /faulty epochs were discarded:\r\n');
+            for e = 1:size(missed_epochs, 1)
+                fprintf(fileID, sprintf('		- block %d --> trial(s) %s\r\n', missed_epochs{e, 1}, num2str(missed_epochs{e, 2})));
+            end
+            fprintf(fileID, '\r\n');
+            fclose(fileID);
+            
+        case 'missednot'
+            fileID = fopen(filename, 'a');
+            fprintf(fileID, '3	no epochs were marked as missed or faulty\r\n');
+            fprintf(fileID, '\r\n');
+            fclose(fileID);
+        
+        case 'merged'
+            fileID = fopen(filename, 'a');
+            fprintf(fileID, '4	data were labelled and split to three datasets according to the condition\r\n');
             fprintf(fileID, '\r\n');
             fclose(fileID);
     end

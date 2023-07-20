@@ -27,6 +27,7 @@
 % 2) PREPROCESSING
 %       - segmentation relative to events --> epochs [-0.3 0.3]s, epoch size 614 bins
 %       - DC removal + linear detrend
+%       - adds global tags to all trials 
 % 
 % 3) REMOVE MISSED OR FAULTY TRIALS
 %       - requires manual input of missed trials: a cell 'missed' 
@@ -60,7 +61,7 @@
 clear all; clc;
 
 % subject
-subject = 1;
+subject = 7;
 if subject < 10
    subj = ['0' num2str(subject)];
 else
@@ -182,7 +183,7 @@ clear suffix epoch eventcode b s data header h
 
 %% 3) REMOVE MISSED OR FAULTY TRIALS
 % ----- section input -----
-missed = {[11], [44]}; 
+missed = {[], []}; 
 % -------------------------
 % add letswave 7 to the top of search path
 addpath(genpath([folder_toolbox '\letswave7-master']));
