@@ -43,14 +43,14 @@
 %       - labels the epochs with appropriate eventcodes
 %       - merges epochs into three condition datasets 
 % 
-% 4) EXPORT FOR EEGLAB
+% ) EXPORT FOR EEGLAB
 %       - saves as .set file
 % 
-% 5) LAUNCH EEGLAB
+% ) LAUNCH EEGLAB
 % 
-% 6) REMOVE MUSCULAR ARTIFACT - SSP-SIR
+% ) REMOVE MUSCULAR ARTIFACT - SSP-SIR
 % 
-% 7) ICA
+% ) ICA
 %       - removes artifact not timelocked to the stimulus:
 %           - ocular artifacts 
 %           - TMS-independent muscular activity
@@ -58,10 +58,10 @@
 
 
 %% PARAMETERS
-clear all; clc;
+% clear all; clc;
 
 % subject
-subject = 4;
+subject = 8;
 if subject < 10
    subj = ['0' num2str(subject)];
 else
@@ -74,9 +74,9 @@ block = [1:15];
 condition = {'M1_single', 'M1_paired', 'CTRL'}; 
 
 % choose relevant directories
-folder_toolbox = uigetdir(pwd, 'Choose the toolbox folder');        % letswave + eeglab masterfiles
-folder_data = uigetdir(pwd, 'Choose the data folder');              % processed data
-folder_output = uigetdir(pwd, 'Choose the OneDrive folder');        % output folder --> figures, logfiles, output .mat file
+% folder_toolbox = uigetdir(pwd, 'Choose the toolbox folder');        % letswave + eeglab masterfiles
+% folder_data = uigetdir(pwd, 'Choose the data folder');              % processed data
+% folder_output = uigetdir(pwd, 'Choose the OneDrive folder');        % output folder --> figures, logfiles, output .mat file
 
 % load output structure 
 load([folder_output '\SMEP.mat']);
@@ -118,7 +118,7 @@ for b = block
 
     % segment 
     fprintf('epoching...')
-    [header, data, ~] = RLW_segmentation(header, data, {{eventcode}}, 'x_start', epoch(1), 'x_duration', epoch(2) - epoch(1));
+    [header, data, ~] = RLW_segmentation(header, data, {{eventcode}}, 'x_start', param.epoch(1), 'x_duration', param.epoch(2) - param.epoch(1));
     
     % remove DC and apply linear detrend
     fprintf('removing DC + detrending...')
@@ -127,15 +127,15 @@ for b = block
     % interpolate TMS artifact
     fprintf('interpolating TMS artifact...')
     [header, data, ~] = RLW_suppress_artifact_event(header, data,...
-        'xstart', interp(1), 'xend',  interp(2), 'event_code', eventcode, 'interp_method', 'pchip');
+        'xstart', param.interp(1), 'xend',  param.interp(2), 'event_code', eventcode, 'interp_method', 'pchip');
 
     % downsample
     fprintf('downsampling...')
-    [header, data, ~] = RLW_downsample(header, data, 'x_downsample_ratio', ds_ratio);
+    [header, data, ~] = RLW_downsample(header, data, 'x_downsample_ratio', param.ds_ratio);
 
     % baseline correct
     fprintf('subtracting baseline...')
-    [header, data, ~] = RLW_baseline(header, data, 'operation', 'subtract', 'xstart', baseline(1), 'xend', baseline(2));
+    [header, data, ~] = RLW_baseline(header, data, 'operation', 'subtract', 'xstart', param.baseline(1), 'xend', param.baseline(2));
     
     % add the global event tag
     for h = 1:length(header.events)
@@ -153,6 +153,15 @@ end
 % add letswave 7 to the top of search path
 addpath(genpath([folder_toolbox '\letswave7-master']));
 
+% create prefix
+for s = 1:length(suffix)
+    if s == 1
+        prefix = suffix{s};
+    else
+        prefix = [suffix{s} ' ' prefix];
+    end
+end
+
 % assign electrode coordinates
 fprintf('Assigning electrode coordinates... ')
 for b = block   
@@ -169,26 +178,15 @@ fprintf('done.\n')
 
 % encode to the logfile 
 logfile_entry('preprocessing', filename, 'parameters', param);
-
-% create prefix
-for s = 1:length(suffix)
-    if s == 1
-        prefix = suffix{s};
-    else
-        prefix = [suffix{s} ' ' prefix];
-    end
-end
-clear suffix eventcode param b s data header lwdata option
+clear suffix eventcode param b h s data header lwdata option
+sound(soundwave)
 
 %% 2) REMOVE MISSED OR FAULTY TRIALS
-% ----- section input -----
-missed = {[1], [1];
-    [9], [7];
-    [11], [1:80];
-    [12], [1:29]}; 
-% -------------------------
 % add letswave 7 to the top of search path
 addpath(genpath([folder_toolbox '\letswave7-master']));
+
+% identify missed epochs
+missed = SMEP.MEP(subject).missed_epochs;
 
 % discard missing/faulty epochs if necessary
 if length(missed{1}) > 0
@@ -226,6 +224,7 @@ if length(missed{1}) > 0
 else    
     % encode to the logfile 
     logfile_entry('missednot', filename);
+    fprintf('no missing trials found.\n')
 end
 
 % save the output structure
@@ -307,7 +306,7 @@ end
 logfile_entry('merged', filename); 
 clear b c e option lwdata folder_input stim_order data2merge counter lwdataset header data global_tags
 
-%% 4) EXPORT FOR EEGLAB
+%% ) EXPORT FOR EEGLAB
 % add letswave 7 to the top of search path
 addpath(genpath([folder_toolbox '\letswave7-master']));
 

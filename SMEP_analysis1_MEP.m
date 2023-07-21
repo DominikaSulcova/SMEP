@@ -61,7 +61,7 @@
 clear all; clc;
 
 % subject
-subject = 7;
+subject = 8;
 if subject < 10
    subj = ['0' num2str(subject)];
 else
@@ -77,11 +77,6 @@ condition = {'M1_single', 'M1_paired', 'CTRL'};
 folder_toolbox = uigetdir(pwd, 'Choose the toolbox folder');        % letswave + eeglab masterfiles
 folder_data = uigetdir(pwd, 'Choose the data folder');              % processed data
 folder_output = uigetdir(pwd, 'Choose the OneDrive folder');        % output folder --> figures, logfiles, output .mat file
-
-% load the finish sound
-% load handel
-load gong
-soundwave = y; clear y Fs
 
 % visualization
 fig_counter = 1;
@@ -183,7 +178,7 @@ clear suffix epoch eventcode b s data header h
 
 %% 3) REMOVE MISSED OR FAULTY TRIALS
 % ----- section input -----
-missed = {[], []}; 
+missed = {[14], [6,7]}; 
 % -------------------------
 % add letswave 7 to the top of search path
 addpath(genpath([folder_toolbox '\letswave7-master']));
