@@ -43,6 +43,17 @@
 %       - labels the epochs with appropriate eventcodes
 %       - merges epochs into three condition datasets 
 % 
+% 4) SUBSET ACCORDING TO MEPS
+%       - creates two new datasets:
+%           1) without epochs that were discarded based on increased motor
+%           activity at the baseline --> 'motor_bl'
+%           2) without epochs that were discarded based on the size of
+%           peak-to-peak MEP amplitude --> 'motor_zero' 
+%               - M1 TEPs: if the amplitude in the window of interest
+%               [0.015, 0.050]s is under 30 microV (threshold +- 15)
+%               - CTRL TEPs: if the amplitude any time post stimulus
+%               exceeds 30 microV (threshold +- 15)
+% 
 % ) EXPORT FOR EEGLAB
 %       - saves as .set file
 % 
@@ -306,24 +317,99 @@ end
 logfile_entry('merged', filename); 
 clear b c e option lwdata folder_input stim_order data2merge counter lwdataset header data global_tags
 
+%% 4) SUBSET ACCORDING TO MEPS
+% ----- section input -----
+suffix = {'motor_bl' 'motor_zero'};
+MEP_interval = [0.015, 0.05];
+% ------------------------- 
+% add letswave 7 to the top of search path
+addpath(genpath([folder_toolbox '\letswave7-master']));
+
+% cycle through conditions
+fprintf('subsetting based on motor activity... ')
+for c = 1:length(condition)
+    fprintf('%s... ', condition{c})
+    
+    % load the data
+    option = struct('filename', sprintf('%s S%s %s', condition{c}, subj, measure));
+    lwdata = FLW_load.get_lwdata(option);
+        
+    % idetify epochs with baseline motor activity 
+    epochs2ditch = SMEP.MEP(subject).baseline_discarded{c};
+    epochs2keep = {};
+    epochs = 1:size(lwdata.data, 1);
+    epochs = epochs(~ismember(epochs, epochs2ditch));
+    if isempty(epochs)
+        continue
+    else
+        for e = 1:length(epochs)
+            epochs2keep{e} = num2str(epochs(e));
+        end
+    end
+    
+    % update global tags
+    lwdata.header.global_tags = lwdata.header.global_tags(epochs, :);
+
+    % discard indicated epochs 
+    option = struct('type', 'epoch', 'items', {epochs2keep}, 'suffix', suffix{1}, 'is_save', 1);
+    lwdata = FLW_selection.get_lwdata(lwdata, option);  
+    
+    % idetify epochs with baseline zero MEP (in case of M1 stimulation) or
+    % post-stimulus motor activity (in case of CTRL stimulation)
+    epochs2ditch = SMEP.MEP(subject).zero_discarded{c};
+    epochs2keep = {};
+    epochs = 1:size(lwdata.data, 1);
+    epochs = epochs(~ismember(epochs, epochs2ditch));
+    if isempty(epochs)
+        continue
+    else
+        for e = 1:length(epochs)
+            epochs2keep{e} = num2str(epochs(e));
+        end
+    end
+    
+    % update global tags
+    lwdata.header.global_tags = lwdata.header.global_tags(epochs, :);
+    
+    % discard indicated epochs 
+    option = struct('type', 'epoch', 'items', {epochs2keep}, 'suffix', suffix{2}, 'is_save', 1);
+    lwdata = FLW_selection.get_lwdata(lwdata, option); 
+    
+    % verify that TEP global tags match MEP global tags
+    load(sprintf('%s %s %s S%s MEP.lw6', suffix{2}, suffix{1}, condition{c}, subj), '-mat')
+    for e = 1:length(lwdata.header.global_tags)
+        if lwdata.header.global_tags(e, :) ~= header.global_tags(e, :)
+            error('Error: Global tags do not match between TEP and MEP files!')
+            break
+        end
+    end 
+end
+fprintf('done.\n')
+
+% read out MEP parameters
+param.threshold = SMEP.MEP(subject).baseline_threshold;
+param.MEP_interval = MEP_interval;
+
+% encode to the logfile 
+logfile_entry('motor_filter', filename, 'parameters', param); 
+clear suffix MEP_interval c option lwdata header epochs2ditch epochs2keep epochs e param
+
 %% ) EXPORT FOR EEGLAB
+% ----- section input -----
+
+% ------------------------- 
 % add letswave 7 to the top of search path
 addpath(genpath([folder_toolbox '\letswave7-master']));
 
 % export in .set format
 fprintf('exporting for EEGLAB...\n')
 for c = 1:length(condition)
-    % load the data
-    option = struct('filename', sprintf('%s S%s %s', condition{c}, subj, measure));
-    lwdata = FLW_load.get_lwdata(option);
-    
-    % export
     FLW_export_EEGLAB.get_lwdata('filename', sprintf('%s S%s %s', condition{c}, subj, measure), 'pathname', pwd);
 end
 fprintf('done.\n')
 clear c
 
-%% 5) LAUNCH EEGLAB
+%% ) LAUNCH EEGLAB
 % add eeglab to the of search path
 addpath(fullfile(folder_toolbox,'eeglab2022.1'));
 
@@ -353,6 +439,7 @@ for c = 1:length(condition)
     
     % remove ECG channels 
     EEG = pop_select(EEG, 'channel', {EEG.chanlocs([1:30]).labels});
+    EEG.ref = 'averef';
     eeglab redraw
     
     % visualize the average response to identify possible bad channels
@@ -370,7 +457,7 @@ for c = 1:length(condition)
     fig_counter = fig_counter + 1;
     
     % SSP-SIR - spherical model 
-    [EEG] = pop_tesa_sspsir(EEG, 'artScale', 'manual', 'timeRange', param.time_range, 'PC', []);
+    [EEG, sspsir_filter{c}] = pop_tesa_sspsir(EEG, 'artScale', 'manual', 'timeRange', param.time_range, 'PC', []);
     [ALLEEG EEG CURRENTSET] = pop_newset(ALLEEG, EEG, 1, 'setname', sprintf('%s S%s %s SSP', condition{c}, subj, measure),...
         'saveold', sprintf('%s\\%s S%s %s.set', pwd, condition{c}, subj, measure), 'gui', 'off'); 
     eeglab redraw
@@ -453,6 +540,43 @@ figure;
 pop_timtopo(EEG, [-100  300], [15  30  45  60 100 180], 'Data after SSP-SIR');
 
 %% FUNCTIONS
+function export_EEGLAB()
+     str=fullfile(option.pathname,option.filename);
+    [p,n]=fileparts(str);
+    EEG.setname=n;
+    EEG.filename=[];
+    EEG.filepath=[];
+    header = CLW_load_header(str);
+    EEG.nbchan=header.datasize(2);
+    EEG.trials=header.datasize(1);
+    EEG.pnts=header.datasize(6);
+    EEG.srate=1/header.xstep;
+    EEG.times=header.xstart+(0:EEG.pnts-1)*header.xstep;
+    EEG.xmin=EEG.times(1);
+    EEG.xmax=EEG.times(end);
+    load(fullfile(p,[n,'.mat']),'data','-MAT');
+    data=permute(single(data),[2,6,1,3,4,5]);
+    EEG.data=data;clear data;
+    EEG.chanlocs=rmfield(header.chanlocs,'SEEG_enabled');
+    EEG.chanlocs=rmfield(header.chanlocs,'topo_enabled');
+    EEG.event=header.events;
+    if ~isempty(EEG.event)
+        [EEG.event.type] = EEG.event.code;
+        temp=num2cell([EEG.event.latency]/header.xstep);
+        [EEG.event.latency]=deal(temp{:});
+        EEG.event = rmfield(EEG.event,'code');
+    end
+
+    EEG.icawinv=[];
+    EEG.icaweights=[];
+    EEG.icasphere=[];
+    EEG.icaweights=[];
+    EEG.icaweights=[];
+    EEG.icaweights=[];
+    EEG.icaweights=[];
+
+    save([n,'.set'],'EEG');
+end
 function logfile_entry(entry, filename, varargin)
     switch entry
         case 'heading'
@@ -506,6 +630,19 @@ function logfile_entry(entry, filename, varargin)
         case 'merged'
             fileID = fopen(filename, 'a');
             fprintf(fileID, '4	data were labelled and split to three datasets according to the condition\r\n');
+            fprintf(fileID, '\r\n');
+            fclose(fileID);
+            
+        case 'motor_filter'
+            a = find(strcmpi(varargin, 'parameters'));
+            param = varargin{a + 1};
+            fileID = fopen(filename, 'a');
+            fprintf(fileID, '5	subset datasets were created according to recorded motor activity:\r\n');
+            fprintf(fileID, '		1) without epochs that were discarded based on increased motor activity at the baseline\r\n');
+            fprintf(fileID, '		2) without epochs that were discarded based on the size of peak-to-peak MEP amplitude\r\n');
+            fprintf(fileID, sprintf('		- M1 TEPs: if the amplitude in the window of interest [%.3f %.3f]s\r\n', param.MEP_interval(1), param.MEP_interval(2)));
+            fprintf(fileID, sprintf('		is under 30 microV (threshold +- %d)\r\n', param.threshold));
+            fprintf(fileID, sprintf('		- CTRL TEPs: if the amplitude any time post stimulus exceeds 30 microV (threshold +- %d)\r\n', param.threshold));
             fprintf(fileID, '\r\n');
             fclose(fileID);
     end

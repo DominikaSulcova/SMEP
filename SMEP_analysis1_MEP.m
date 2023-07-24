@@ -306,7 +306,7 @@ clear b c e option lwdata folder_input stim_order data2merge counter lwdataset h
 
 %% 5) DISCARD TRIALS WITH EXCESSIVE BASELINE ACTIVITY
 % ----- section input -----
-prefix = 'visual';
+prefix = 'motor_bl';
 baseline = [-0.2 0];
 allow_sd = 3;
 threshold = 15;
@@ -537,7 +537,7 @@ clear baseline threshold allow_sd c header data ...
 
 %% 6) CALCULATE PEAK-TO-PEAK AMPLITUDE, IDENTIFY ZERO-RESPONSE TRIALS
 % ----- section input -----
-suffix = 'zero_filtered';
+suffix = 'motor_zero';
 response_window = {[0.015 0.05], [0.015 0.05], [0.015 0.3]};
 threshold = 15;
 % -------------------------
@@ -605,7 +605,7 @@ end
 fprintf('done.\n')
 
 % update the logfile
-logfile_entry('zero-response', filename, 'output', SMEP.MEP(subject))
+logfile_entry('zero_response', filename, 'output', SMEP.MEP(subject))
 
 % save the output structure
 save([folder_output '\SMEP.mat'], 'SMEP');
@@ -741,7 +741,7 @@ function logfile_entry(entry, filename, varargin)
             fprintf(fileID, '\r\n');
             fclose(fileID);
             
-        case 'zero-response'
+        case 'zero_response'
             a = find(strcmpi(varargin, 'output'));
             if ~isempty(a)
                 output = varargin{a + 1};
