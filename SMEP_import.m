@@ -20,8 +20,7 @@ clear all; clc;
 
 % dataset
 study = 'SMEP';
-subject = 'S08';
-block = [15];
+subject = 'S09';
 
 % choose relevant directories
 folder_lw = uigetdir(pwd, 'Choose the letswave folder');        % letswave masterfiles 
@@ -32,6 +31,9 @@ cd(folder_output)
 addpath(genpath([folder_lw '\letswave6-master']));
 
 %% import MEP data
+% ----- section input -----
+block = [1:15];
+% -------------------------
 % define prefix
 prefix = {'MEP'};
 
@@ -78,6 +80,9 @@ end
 clear prefix folder_input a b i data header
 
 %% import NeurOne data
+% ----- section input -----
+block = [7:15];
+% -------------------------
 % define prefix
 prefix = {'TEP', 'SMEP'};
 

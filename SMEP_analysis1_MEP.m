@@ -61,7 +61,7 @@
 clear all; clc;
 
 % subject
-subject = 8;
+subject = 9;
 if subject < 10
    subj = ['0' num2str(subject)];
 else
@@ -77,6 +77,7 @@ condition = {'M1_single', 'M1_paired', 'CTRL'};
 folder_toolbox = uigetdir(pwd, 'Choose the toolbox folder');        % letswave + eeglab masterfiles
 folder_data = uigetdir(pwd, 'Choose the data folder');              % processed data
 folder_output = uigetdir(pwd, 'Choose the OneDrive folder');        % output folder --> figures, logfiles, output .mat file
+cd(folder_data)
 
 % visualization
 fig_counter = 1;
@@ -178,7 +179,7 @@ clear suffix epoch eventcode b s data header h
 
 %% 3) REMOVE MISSED OR FAULTY TRIALS
 % ----- section input -----
-missed = {[14], [6,7]}; 
+missed = {[], []}; 
 % -------------------------
 % add letswave 7 to the top of search path
 addpath(genpath([folder_toolbox '\letswave7-master']));
@@ -506,13 +507,11 @@ for c = 1:length(condition)
     data(discarded_pos, :, :, :, :, :) = [];
     save([header.name '.mat'], 'data')
 
-    % fill in the outcome table and save
+    % fill in the output structure and save
     SMEP.MEP(subject).baseline_discarded{c} = sort(discarded);
     SMEP.MEP(subject).baseline_cycles(c) = cycle - 1;
     SMEP.MEP(subject).baseline_threshold = threshold;
     SMEP.MEP(subject).baseline_kept(c) = size(data, 1);
-
-    % save the output structure
     save([folder_output '\SMEP.mat'], 'SMEP');
 
     % save and close the figure
