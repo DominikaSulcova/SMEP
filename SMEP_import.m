@@ -20,7 +20,7 @@ clear all; clc;
 
 % dataset
 study = 'SMEP';
-subject = 'S09';
+subject = 'S10';
 
 % choose relevant directories
 folder_lw = uigetdir(pwd, 'Choose the letswave folder');        % letswave masterfiles 

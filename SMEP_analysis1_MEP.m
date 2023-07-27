@@ -61,7 +61,7 @@
 clear all; clc;
 
 % subject
-subject = 9;
+subject = 10;
 if subject < 10
    subj = ['0' num2str(subject)];
 else
@@ -122,7 +122,7 @@ SMEP.info(subject).CTRL = str2num(info{6});
 save([folder_output '\SMEP.mat'], 'SMEP');
 
 % create logfile
-filename = sprintf('%s\\Logfiles\\SMEP S%s %s.txt', folder_output, subj, SMEP.info(subject).date); 
+filename = sprintf('%s\\Logfiles\\SMEP_S%s_%s.txt', folder_output, subj, SMEP.info(subject).date); 
 initialize_logfile(SMEP, subject, filename);
 logfile_entry('heading', filename);
 clear info 
@@ -310,7 +310,7 @@ clear b c e option lwdata folder_input stim_order data2merge counter lwdataset h
 prefix = 'motor_bl';
 baseline = [-0.2 0];
 allow_sd = 3;
-threshold = 15;
+threshold = 22;
 % -------------------------
 % add letswave 6 to the top of search path
 addpath(genpath([folder_toolbox '\letswave6-master']));
@@ -538,7 +538,7 @@ clear baseline threshold allow_sd c header data ...
 % ----- section input -----
 suffix = 'motor_zero';
 response_window = {[0.015 0.05], [0.015 0.05], [0.015 0.3]};
-threshold = 15;
+threshold = 22;
 % -------------------------
 % add letswave 6 to the top of search path
 addpath(genpath([folder_toolbox '\letswave6-master']));

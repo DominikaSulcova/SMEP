@@ -102,7 +102,7 @@ cd(folder_data)
 load([folder_output '\SMEP.mat']);
 
 % create logfile filename, launch the TEP section
-filename = sprintf('%s\\Logfiles\\SMEP S%s %s.txt', folder_output, subj, SMEP.info(subject).date); 
+filename = sprintf('%s\\Logfiles\\SMEP_S%s_%s.txt', folder_output, subj, SMEP.info(subject).date); 
 % logfile_entry('heading', filename);
 
 % load the finish sound
@@ -479,10 +479,7 @@ for c = 1:length(condition)
     epochs_end = strfind(EEG.history, char_end) - 1;
     eval(['discarded.epochs_rejected{c} = [' EEG.history(epochs_start:epochs_end) '];']);
     discarded.epochs_kept(c) = length(EEG.epoch);
-    
-    % update global tags
-    EEG.global_tags(discarded.epochs_rejected{c}, :) = [];
-    
+      
     % save dataset
     name = sprintf('%s %s S%s %s.set', measure, condition{c}, subj, suffix{2}); 
     pop_saveset(EEG, 'filename', name, 'filepath', folder_data);
@@ -503,8 +500,9 @@ clear suffix c name answer interpolated discarded
 % ----- section input -----
 suffix = 'sspsir';
 time_range = [-6, 50];
+baseline = [-0.25 -0.006];
 % ------------------------- 
-% filter individual datasets
+% apply SSPSIR individually to each dataset and save the filters
 for c = 1:length(condition)
     % select the dataset
     EEG = ALLEEG(c);
@@ -513,8 +511,11 @@ for c = 1:length(condition)
         
     % visual check - before SSP-SIR
     figure; 
-    pop_timtopo(EEG, [-100  300], [5 15  30  45  60 100 180], 'Original data');
-    sgtitle(sprintf('S%s - %s: original data', subj, condition{c}))
+    pop_timtopo(EEG, [-100  300], [5 15  30  45  60 100 180]);
+    sgtitle(sprintf('S%s - %s: original data', subj, strrep(condition{c}, '_', ' ')))
+    figure_name = sprintf('SMEP %s S%s %s no_filter', measure, subj, condition{c}); 
+    savefig([folder_output '\Figures\' figure_name '.fig'])
+    saveas(gcf, [folder_output '\Figures\' figure_name '.svg'])
     
     % SSP-SIR - spherical model 
     name = sprintf('%s %s S%s %s', measure, condition{c}, subj, suffix); 
@@ -523,12 +524,6 @@ for c = 1:length(condition)
     name = sprintf('%s %s S%s %s.set', measure, condition{c}, subj, suffix); 
     EEG.filename = name;
     eeglab redraw
-    EEG = eeg_checkset(EEG);
-    
-    % visual check - after SSP-SIR
-    figure; 
-    pop_timtopo(EEG, [-100  300], [5 15  30  45  60 100 180], 'Filtered data');
-    sgtitle(sprintf('S%s - %s: filtered data', subj, condition{c}))
     
     % extract information about rejected components
     param(c) = EEG.SSPSIR;
@@ -555,116 +550,116 @@ for c = 1:length(condition)
             SMEP.TEP(subject).sspsir_params(a).filter, []);
         EEG.data =  EEG_trials.data;
     end
+    
+    % baseline correct and save
+    EEG = pop_rmbase(EEG, baseline, []);
+    name = sprintf('%s %s S%s %s', measure, condition{c}, subj, suffix); 
+    [ALLEEG EEG CURRENTSET] = pop_newset(ALLEEG, EEG, c, 'setname', name, 'overwrite', 'on', 'gui', 'off'); 
     eeglab redraw
     
-    % baseline correct 
-    EEG = pop_rmbase(EEG, param.baseline, []);
-    
-    % visual check - after all SSP-SIR rounds
+    % visual check - after SSP-SIR
     figure; 
-    pop_timtopo(EEG, [-100  300], [5 15  30  45  60 100 180], 'Final data');
-    sgtitle(sprintf('S%s - %s: final data', subj, condition{c}))
-    
+    pop_timtopo(EEG, [-100  300], [5 15  30  45  60 100 180]);
+    sgtitle(sprintf('S%s - %s: filtered data', subj, strrep(condition{c}, '_', ' ')))
+    figure_name = sprintf('SMEP %s S%s %s sspsir', measure, subj, condition{c}); 
+    savefig([folder_output '\Figures\' figure_name '.fig'])
+    saveas(gcf, [folder_output '\Figures\' figure_name '.svg'])
+       
     % save dataset
     name = sprintf('%s %s S%s %s.set', measure, condition{c}, subj, suffix); 
     pop_saveset(EEG, 'filename', name, 'filepath', folder_data);
 end
-
+%
 % encode to the logfile
 logfile_entry('ssp-sir', filename, 'PC', SMEP.TEP(subject).sspsir_PC); 
-clear suffix time_range c name param EEG.trials
+clear suffix time_range baseline c name figure_name param a other_datasets
 
-%% 8) EEGLAB: ICA 
+%% 8) EXPORT BACK TO LETSWAVE
 % ----- section input -----
-suffix = 'ica';
-param.baseline = [-0.25 -0.006];
-param.compression = 20;
+prefix = {'motor_zero motor_bl' 'motor_bl' 'motor_zero motor_bl'};
+suffix = 'sspsir';
 % ------------------------- 
-% % load data, if necessary
-% eeglab
-% for c = 1:length(condition)
-%     % load the dataset
-%     name = sprintf('%s %s S%s sspsir.set', measure, condition{c}, subj);  
-%     EEG = pop_loadset('filename', name, 'filepath', folder_data);
-%     [ALLEEG EEG CURRENTSET] = eeg_store(ALLEEG, EEG, c);
-%         
-%     % baseline correct 
-%     EEG = pop_rmbase(EEG, param.baseline, []);
-%     eeglab redraw  
-%     
-%     % modify dataset info
-%     EEG.subject = subj; 
-%     EEG.session = 1;
-% end
+% add letswave 6 to the top of search path
+addpath(genpath([folder_toolbox '\letswave6-master']));
 
-% run ICA separately on all datasets 
-
-
-% run ICA separately for each dataset
+% export data and header
+fprintf('exporting back to letswave: ')
 for c = 2:length(condition)
-    % select the dataset
+    fprintf('...%s ', condition{c})
+    % select the dataset in EEGLAB
     EEG = ALLEEG(c);
     [ALLEEG EEG CURRENTSET] = eeg_store(ALLEEG, EEG, c);
     eeglab redraw
-
-    % set the compression level
-    EEG = pop_tesa_pcacompress(EEG, 'compVal', param.compression, 'plot', 'off');
     
-    % visual check before ICA
-    figure; 
-    pop_timtopo(EEG, [-100  300], [5 15  30  45  60 100 180], 'Filtered data');
-    sgtitle(sprintf('S%s - %s: frequency-filtered data', subj, condition{c}))
+    % load the original data
+    option = struct('filename', sprintf('%s %s S%s %s', prefix{c}, condition{c}, subj, measure));
+    lwdata = FLW_load.get_lwdata(option);
     
-    % run ICA 
-    EEG = pop_tesa_fastica(EEG, 'approach', 'symm', 'g', 'tanh', 'stabilization', 'off');
-    EEG = pop_tesa_compplot(EEG, 'figSize', 'large', 'plotTimeX', [-0.2 0.5], 'plotFreqX', [1 100],...
-        'freqScale', 'log', 'saveWeights', 'off');
+    % replace the data
+    lwdata.data = [];
+    for t = 1:size(EEG.data, 3)
+        for e = 1:size(EEG.data, 1)
+            for i = 1:size(EEG.data, 2)
+                lwdata.data(t, e, 1, 1, 1, i) = EEG.data(e, i, t);
+            end
+        end
+    end
     
-    % extract ICA parameters
-    SMEP.TEP(subject).ICA(c) = rmfield(EEG.icaCompClass.Manual1, 'name');
-    save([folder_output '\SMEP.mat'], 'SMEP');
+    % modify header
+    lwdata.header.name = sprintf('%s %s %s S%s %s', suffix, prefix{c}, condition{c}, subj, measure);
+    lwdata.header.datasize = size(lwdata.data);
+    lwdata.header.chanlocs = lwdata.header.chanlocs(1:size(lwdata.data, 2));
+    lwdata.header.events = lwdata.header.events(1:size(lwdata.data, 1));
     
-    % baseline correct post ICA
-    EEG = pop_rmbase(EEG, param.baseline, []);
+    % update global tags
+    lwdata.header.global_tags(SMEP.TEP(subject).visual_discarded{c}, :) = [];   
     
-    % rename
-    EEG.setname = sprintf('%s %s S%s %s', measure, condition{c}, subj, suffix); 
-    
-    % visual check after ICA
-    figure; 
-    pop_timtopo(EEG, [-100  300], [5 15  30  45  60 100 180], 'Data after ICA');
-    sgtitle(sprintf('S%s - %s: data after ICA', subj, condition{c}))
-    
-    % save dataset
-    pop_saveset(EEG, 'filename', [EEG.setname '.set'], 'filepath', folder_data);
+    % save 
+    CLW_save([], lwdata.header, lwdata.data);
 end
+fprintf('...done.\n')
+sound(soundwave)
 
-clear param suffix 
+% encode to the logfile 
+logfile_entry('letswave', filename); 
+clear prefix suffix ref c t e i lwdata option ...
+    ALLCOM ALLEEG CURRENTSET CURRENTSTUDY EEG globalvars LASTCOM PLUGINLIST STUDY
+close eeglab
 
-%% 8) EEGLAB: INTERPOLATE LEFTOVER ARTIFACT + FREQUENCY FILTER
+%% 9) ICA 
+% ----- section input -----
+suffix = 'ica';
+param.components = 20;
+param.baseline = [-0.25 -0.006];
+% ------------------------- 
+% add letswave 7 to the top of search path
+addpath(genpath([folder_toolbox '\letswave7-master']));
+
+% load all datasets
+for c = 1:length(condition)
+    dataset{c} = sprintf('%s %s %s.lw6', prefix, subj, condition{c});
+end
+option = struct('filename', {dataset});
+lwdataset = FLW_load.get_lwdataset(option);
+
+% calculate ICA matrix based on merged datasets
+fprintf('computing ICA matrix...')
+option = option_ica;
+lwdataset = FLW_compute_ICA_merged.get_lwdataset(lwdataset, option);
+fprintf('done.\n')
+
+% update prefix
+prefix = [suffix ' ' prefix];
+clear suffix
+
+%% 8) INTERPOLATE LEFTOVER ARTIFACT + FREQUENCY FILTER
 % ----- section input -----
 suffix = 'filtered';
 param.filter_butter = [1, 80, 4];
 param.filter_notch = [50, 2];
 param.baseline = [-0.25 -0.006];
 % ------------------------- 
-for c = 1:length(condition)
-    % select the dataset
-    EEG = ALLEEG(c);
-    [ALLEEG EEG CURRENTSET] = eeg_store(ALLEEG, EEG, c);
-    eeglab redraw
-    
-    % butterworth bandpass filter
-    name = sprintf('%s %s S%s %s', measure, condition{c}, subj, suffix); 
-    EEG = pop_tesa_filtbutter(EEG, param.filter_butter(1), param.filter_butter(2), param.filter_butter(3), 'bandpass');
-    [ALLEEG EEG CURRENTSET] = pop_newset(ALLEEG, EEG, c, 'setname', name, 'overwrite', 'on', 'gui', 'off'); 
-    
-    % 50Hz notch filter
-    EEG = pop_eegfiltnew(EEG, 'locutoff', param.filter_notch(1) - param.filter_notch(2), ...
-        'hicutoff', param.filter_notch(1) + param.filter_notch(2), 'revfilt', 1, 'plotfreqz', 0);
-    [ALLEEG EEG CURRENTSET] = pop_newset(ALLEEG, EEG, c, 'overwrite', 'on', 'gui', 'off'); 
-    eeglab redraw;
-end
+
 
 %% FUNCTIONS
 function logfile_entry(entry, filename, varargin)
@@ -775,6 +770,12 @@ function logfile_entry(entry, filename, varargin)
             fprintf(fileID, '		- datasets were then additionally filtered by other two filters, to ensure comparability\r\n');
             fprintf(fileID, '\r\n');
             fclose(fileID);
+            
+        case 'letswave'
+            fileID = fopen(filename, 'a');
+            fprintf(fileID, 'data were exported back to letswave\r\n');
+            fprintf(fileID, '\r\n');
+            fclose(fileID);
     end
 end
 function export_EEGLAB(lwdata, filename, ref, subj)
@@ -822,9 +823,33 @@ function export_EEGLAB(lwdata, filename, ref, subj)
     save([filename,'.set'], 'EEG');
 end
 function [EEG_out] = SSP_SIR_trials(EEG_in, L, art_topographies, filt_ker, M)
+%     L = param(c).L_ave;
+%     EEG_in = EEG;
+%     art_topographies = rmfield(param, {'PC', 'filter', 'L_ave'});
+%     filt_ker = param(c).filter;
+%     M = [];
+%     EEG_out = EEG_in;
+%     
+%     % prepare individual filters
+%     for t = 1:length(art_topographies)
+%         statement = sprintf('P%d = eye(size(EEG_in.data,1)) - art_topographies(t).topographies*art_topographies(t).topographies'';', t);
+%         eval(statement)
+%     end
+%     
+%     % create final composite filter
+%     statement = 'P = P1';
+%     if length(art_topographies) > 1
+%         for t = 2:length(art_topographies)
+%             statement = [statement sprintf(' * P%d', t)];
+%         end
+%     end
+%     statement = [statement ';'];
+%     eval(statement);
+
     EEG_out = EEG_in;
     P = eye(size(EEG_in.data,1)) - art_topographies*art_topographies';
-
+    
+    % apply filter
     for i = 1:size(EEG_in.data,3)
 
         data = EEG_in.data(:,:,i);
