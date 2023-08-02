@@ -187,7 +187,7 @@ for b = block
     lwdata = FLW_load.get_lwdata(option);
     
     % assign electrode coordinates
-    option = struct('filepath', 'F:\letswave7-master\letswave7-master\res\electrodes\spherical_locations\Standard-10-20-Cap81.locs', ...
+    option = struct('filepath', [folder_toolbox 'letswave7-master\letswave7-master\res\electrodes\spherical_locations\Standard-10-20-Cap81.locs'], ...
         'suffix', '', 'is_save', 1);
     lwdata = FLW_electrode_location_assign.get_lwdata(lwdata, option);
 end
@@ -420,7 +420,7 @@ for c = 1:length(condition)
     
     % export in .set format
     name = sprintf('%s %s S%s %s', measure, condition{c}, subj, suffix);
-    export_EEGLAB(lwdata, name, ref);
+    export_EEGLAB(lwdata, name, ref, subj);
 end
 fprintf('...done.\n')
 
