@@ -592,8 +592,7 @@ for c = 2:length(condition)
     eeglab redraw
     
     % load the original data
-    option = struct('filename', sprintf('%s %s S%s %s', prefix{c}, condition{c}, subj, measure));
-    lwdata = FLW_load.get_lwdata(option);
+    [lwdata.header, lwdata.data] = CLW_load(sprintf('%s %s S%s %s', prefix{c}, condition{c}, subj, measure));
     
     % replace the data
     lwdata.data = [];
