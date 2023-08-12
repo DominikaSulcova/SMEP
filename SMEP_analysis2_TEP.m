@@ -22,14 +22,12 @@
 %   script takes care of the logfile update and encodes the output
 %   parameters to the ouput structure
 % 
-% 1) PREPROCESSING
+% 1) FIRST PREPROCESSING
 %       - assign electrode coordinates
-%       - re-reference to common average
 %       - epoch around the event [-1 2]s
 %       - remove the DC shift and linearly detrend
-%       - interpolate the TMS artifact [-0.006 0.003]s
+%       - replace the TMS artifact [-0.006 0.003]s with zeros
 %       - downsample to 2kHz (1/10)
-%       - baseine correct by mean subtraction [-0.25 -0.006]s
 %       - remove extra event categories
 %       - adds global tags to all trials
 % 
@@ -57,11 +55,12 @@
 % 5) EXPORT FOR EEGLAB
 %       - saves as a .set file
 % 
-% 6) EEGLAB: BAD CHANNELS & EPOCHS
+% 6) EEGLAB: PREPROCESSING
 %       - starts a new EEGLAB session
 %       - loads all datasets
 %       - interpolates bad channels, if necessary
 %       - lets user manualy identify artifactual epochs and discards them
+%       - baseine corrects by mean subtraction [-0.25 -0.006]s
 %       - saves the new dataset --> 'visual'
 % 
 % 7) EEGLAB: SSP-SIR
@@ -112,10 +111,10 @@ soundwave = y; clear y Fs
 
 %% 1) PREPROCESSING
 % ----- section input -----
-suffix = {'reref' 'ep' 'dc' 'interp' 'ds' 'bl'};
+suffix = {'ep' 'dc' 'artif_out' 'ds'};
 eventcode = 'Stimulation';
 param.epoch = [-1 2];
-param.interp = [-0.006 0.003];
+param.artifact = [-0.006 0.003];
 param.ds_ratio = 10;
 param.baseline = [-0.25 -0.006];
 % ------------------------- 
@@ -129,10 +128,6 @@ for b = block
     % load data and header
     [header, data] = CLW_load(sprintf('S%s %s b%d', subj, measure, b));   
 
-    % rereference to common average
-    fprintf('rereferencing to average...')
-    [header, data, ~] = RLW_rereference(header, data, 'apply_list', {header.chanlocs(1:30).labels}, 'reference_list', {header.chanlocs(1:30).labels});
-
     % segment 
     fprintf('epoching...')
     [header, data, ~] = RLW_segmentation(header, data, {{eventcode}}, 'x_start', param.epoch(1), 'x_duration', param.epoch(2) - param.epoch(1));
@@ -141,18 +136,14 @@ for b = block
     fprintf('removing DC + detrending...')
     [header, data, ~] = RLW_dc_removal(header, data, 'linear_detrend', 1);
 
-    % interpolate TMS artifact
-    fprintf('interpolating TMS artifact...')
-    [header, data, ~] = RLW_suppress_artifact_event(header, data,...
-        'xstart', param.interp(1), 'xend',  param.interp(2), 'event_code', eventcode, 'interp_method', 'pchip');
+    % remove TMS artifact
+    fprintf('removing TMS artifact...')
+    x_start; x_end;
+    data(:, :, :, :, :, x_start:x_end) = 0;
 
     % downsample
     fprintf('downsampling...')
     [header, data, ~] = RLW_downsample(header, data, 'x_downsample_ratio', param.ds_ratio);
-
-    % baseline correct
-    fprintf('subtracting baseline...')
-    [header, data, ~] = RLW_baseline(header, data, 'operation', 'subtract', 'xstart', param.baseline(1), 'xend', param.baseline(2));
     
     % add the global event tag
     for h = 1:length(header.events)
@@ -195,7 +186,7 @@ fprintf('done.\n')
 
 % encode to the logfile 
 logfile_entry('preprocessing', filename, 'parameters', param);
-clear suffix eventcode param b h s data header lwdata option
+clear suffix eventcode param b h s data header lwdata option x_start x_end
 sound(soundwave)
 
 %% 2) REMOVE MISSED OR FAULTY TRIALS
@@ -464,7 +455,7 @@ for c = 1:length(condition)
         interpolated{c} = '';
     else
         % identify channels to interpolate
-        interpolated{c} = '';
+        interpolated{c} = answer;
     end
     
     % remove bad epochs
@@ -499,8 +490,14 @@ clear suffix c name answer interpolated discarded
 %% 7) EEGLAB: SSP-SIR
 % ----- section input -----
 suffix = 'sspsir';
-time_range = [-6, 50];
-baseline = [-0.25 -0.006];
+baseline = [-0.25 -0.006]; 
+time_range = [-0.006, 0.050];
+% time_range = time_range/1000;                     % uncomment this if the filter is not applied to appropriate time interval 
+                                                    % --> in that case a following change must be made in tesa_spssir function  
+                                                    % in the calculation of the smoothening function:   if [timeRange(tidx,2) - timeRange(tidx,1)] < 1
+                                                    %                                                       smoothLength = smoothLength / 1000;
+                                                    %                                                   end
+
 % ------------------------- 
 % apply SSPSIR individually to each dataset and save the filters
 for c = 1:length(condition)
@@ -511,16 +508,29 @@ for c = 1:length(condition)
         
     % visual check - before SSP-SIR
     figure; 
-    pop_timtopo(EEG, [-100  300], [5 15  30  45  60 100 180]);
+    pop_timtopo(EEG, [-50  150], [5  15  30  45  60  100]);
     sgtitle(sprintf('S%s - %s: original data', subj, strrep(condition{c}, '_', ' ')))
     figure_name = sprintf('SMEP %s S%s %s no_filter', measure, subj, condition{c}); 
     savefig([folder_output '\Figures\' figure_name '.fig'])
     saveas(gcf, [folder_output '\Figures\' figure_name '.svg'])
-    
+
+    % ask if the original ssp filter should be applied
+    answer{counter} = questdlg('Do you want to apply original SSP-SIR', 'SSP-SIR', 'YES', 'NO', 'YES'); 
+
     % SSP-SIR - spherical model 
     name = sprintf('%s %s S%s %s', measure, condition{c}, subj, suffix); 
-    [EEG] = pop_tesa_sspsir(EEG, 'artScale', 'manual', 'timeRange', time_range, 'PC', []);
-    [ALLEEG EEG CURRENTSET] = pop_newset(ALLEEG, EEG, c, 'setname', name, 'overwrite', 'on', 'gui', 'off'); 
+    [EEG, EEG_old] = pop_tesa_sspsir(EEG, 'artScale', 'manual', 'timeRange', time_range, 'PC', []);
+    switch answer{counter}
+        case 'YES'
+            clear EEG_old
+        case 'NO'
+            EEG = EEG_old;
+            clear EEG_old
+    end  
+
+    % baseline correct and save
+    EEG = pop_rmbase(EEG, baseline, []);
+    [ALLEEG EEG CURRENTSET] = pop_newset(ALLEEG, EEG, c, 'setname', name, 'overwrite', 'on', 'gui', 'off');
     name = sprintf('%s %s S%s %s.set', measure, condition{c}, subj, suffix); 
     EEG.filename = name;
     eeglab redraw
@@ -559,7 +569,7 @@ for c = 1:length(condition)
     
     % visual check - after SSP-SIR
     figure; 
-    pop_timtopo(EEG, [-100  300], [5 15  30  45  60 100 180]);
+    pop_timtopo(EEG, [-50  150], [5  15  30  45  60  100]);
     sgtitle(sprintf('S%s - %s: filtered data', subj, strrep(condition{c}, '_', ' ')))
     figure_name = sprintf('SMEP %s S%s %s sspsir', measure, subj, condition{c}); 
     savefig([folder_output '\Figures\' figure_name '.fig'])
@@ -807,8 +817,7 @@ function export_EEGLAB(lwdata, filename, ref, subj)
         EEG.event = rmfield(EEG.event,'code');
     end
     
-    % add specific fields
-    EEG.ref = ref;
+    % global tags
     EEG.global_tags = lwdata.header.global_tags;
     
     % create required empty fields
