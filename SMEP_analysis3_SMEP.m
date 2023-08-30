@@ -28,15 +28,20 @@ clear all; clc;
 
 % dataset
 measure = 'SMEP';
-subject = 'S02';
+subject = 'S04';
 block = [1:15];
 condition = {'M1_single', 'M1_paired', 'CTRL'}; 
 
 % choose relevant directories
 folder_git = uigetdir(pwd, 'Choose the Git folder');            % Git repo --> source of saved default files, if needed
-folder_lw = uigetdir(pwd, 'Choose the letswave folder');        % letswave masterfiles
-folder_output = uigetdir(pwd, 'Choose the output folder');      % processed data
+folder_toolbox = uigetdir(pwd, 'Choose the letswave folder');   % toolboxes masterfiles
+folder_data = uigetdir(pwd, 'Choose the output folder');        % processed data
 folder_figures = uigetdir(pwd, 'Choose the figures folder');    % figures
+
+% launch directory and letswave
+cd(folder_data)
+addpath(genpath([folder_toolbox '\letswave7-master']));
+letswave
 
 % visualization
 fig_counter = 1;
@@ -49,13 +54,13 @@ suffix = {'dc1'};
 coordinates_path = 'F:\letswave7-master\letswave7-master\res\electrodes\spherical_locations\SPINAL_17+1chan.locs';
 % ------------------------- 
 % add letswave 7 to the top of search path
-addpath(genpath([folder_lw '\letswave7-master']));
+addpath(genpath([folder_toolbox '\letswave7-master']));
 
 % cycle through blocks
 for b = block
     % get the dataset
     disp([subject  ' - block ' num2str(b)])
-    dataset = [folder_output '\' subject ' ' measure ' b' num2str(b) '.lw6'];
+    dataset = [folder_data '\' subject ' ' measure ' b' num2str(b) '.lw6'];
     option = struct('filename', dataset);
     lwdata = FLW_load.get_lwdata(option);
     
@@ -79,37 +84,38 @@ suffix = {'interp' 'ds' 'QRS' 'avg' 'ECG_clean'};
 fs = 4000;
 duration = 8;
 ds_ratio = 5;
+interp = [-0.005 0.002];
 % ------------------------- 
 % add letswave 6 to the top of search path
-addpath(genpath([folder_lw '\letswave6-master']));
+addpath(genpath([folder_toolbox '\letswave6-master']));
 
 % ask for channles to interpolate
 chan2interp = inputdlg('Channel to interpolate: ', 'Bad channel', [1 50], {''});
-if length(chan2interp{1}) > 0
-    % identify channels to average
-    keepgoing = 1;
-    chan2avg = cell(0, 0);
-    while keepgoing
-        chan = inputdlg(sprintf('Channel to average #%d: ', length(chan2avg) + 1), 'Bad channel', [1 50], {''});
-        if length(chan{1}) > 0                
-            chan2avg = cat(1, chan2avg, chan);
-        else
-           keepgoing = 0; 
-        end
-    end
-end
+% if length(chan2interp{1}) > 0
+%     % identify channels to average
+%     keepgoing = 1;
+%     chan2avg = cell(0, 0);
+%     while keepgoing
+%         chan = inputdlg(sprintf('Channel to average #%d: ', length(chan2avg) + 1), 'Bad channel', [1 50], {''});
+%         if length(chan{1}) > 0                
+%             chan2avg = cat(1, chan2avg, chan);
+%         else
+%            keepgoing = 0; 
+%         end
+%     end
+% end
 
 % cycle through blocks
 for b = block
     disp([subject ' - ' num2str(b)])
     
     % load data and header
-    [header, data] = CLW_load([folder_output '\' prefix ' ' subject ' ' measure ' b' num2str(b)]);
+    [header, data] = CLW_load([folder_data '\' prefix ' ' subject ' ' measure ' b' num2str(b)]);
     
     % interpolate TMS artifact
     disp('Interpolating the TMS artifact from -0.005 to 0.002 s...')
     [header, data, ~] = RLW_suppress_artifact_event(header, data,...
-        'xstart', -0.005, 'xend', 0.002, 'event_code', 'Stimulation', 'interp_method', 'pchip');
+        'xstart', interp(1), 'xend', interp(2), 'event_code', 'Stimulation', 'interp_method', 'pchip');
     
     % if necessary, interpolate a bad channel
     if length(chan2interp{1}) > 0
@@ -179,86 +185,157 @@ end
 
 % update prefix
 prefix = [suffix{5} ' ' suffix{2} ' ' suffix{1} ' ' prefix];
-clear fs duration ds_ratio suffix b i a index apply_list header_all data_all data_ECG header_ECG matrix data_visual input ...
+clear fs duration ds_ratio interp suffix b i a index apply_list header_all data_all data_ECG header_ECG matrix data_visual input ...
     chan2interp chan2avg keepgoing comp2remove comp2keep fig
 
-%% 3) frequency filter, segmentation + linear detrend 
+%% 3) segmentation   
 % ----- section input -----
-suffix = {'spinal' 'reref' 'bandpass' 'notch' 'ep' 'dc2'};
-bandpass = [2 1000];
-epoch = [-0.2 0.5];
-% -------------------------  
+suffix = {'spinal' 'ep' 'dc2' 'bc1'};
+epoch = [-1 1];
+baseline = [-0.25 -0.01];
+prefix = 'ECG_clean ds interp dc1';
+% ------------------------- 
 % add letswave 7 to the top of search path
-addpath(genpath([folder_lw '\letswave7-master']));
+addpath(genpath([folder_toolbox '\letswave7-master']));
 
-% cycle through blocks
+% process
 for b = block
     % get the dataset
-    disp([subject ' - block ' num2str(b)])
-    dataset = [folder_output '\' prefix ' ' subject ' ' measure ' b' num2str(b) '.lw6'];
+    fprintf('%s - block %d: ', subject, b)
+    dataset = [folder_data '\' prefix ' ' subject ' ' measure ' b' num2str(b) '.lw6'];
     option = struct('filename', dataset);
     lwdata = FLW_load.get_lwdata(option);
     
     % select spinal electrodes
-    disp('Selecting spinal electrodes...')
-    option = struct('type', 'channel', 'items', {{lwdata.header.chanlocs(1:18).labels}}, 'suffix', suffix{1}, 'is_save', 0);
+    fprintf('selecting spinal electrodes ...')
+    option = struct('type', 'channel', 'items', {{lwdata.header.chanlocs(2:18).labels}}, 'suffix', suffix{1}, 'is_save', 0);
     lwdata = FLW_selection.get_lwdata(lwdata, option);
     
-%     % re-reference to common average
-%     disp('Re-referencing...')
-%     option = struct('reference_list', {{lwdata.header.chanlocs(1:18).labels}}, 'apply_list', {{lwdata.header.chanlocs(1:17).labels}}, 'suffix', suffix{2}, 'is_save', 0);
-%     lwdata = FLW_rereference.get_lwdata(lwdata, option);
-    
-    % bandpass
-    disp('Applying Butterworth bandpass filter...')
-    option = struct('filter_type', 'bandpass', 'high_cutoff', bandpass(2),'low_cutoff', bandpass(1),...
-        'filter_order', 4, 'suffix', suffix{3}, 'is_save', 0);
-    lwdata = FLW_butterworth_filter.get_lwdata(lwdata, option);
-    
-    % notch
-    disp('Applying FFT notch filter...')
-    option = struct('filter_type', 'notch', 'notch_fre', 50, 'notch_width', 2, 'slope_width', 2,...
-        'harmonic_num', 2,'suffix', suffix{4},'is_save', 0);
-    lwdata = FLW_FFT_filter.get_lwdata(lwdata, option);
-    
     % segment
-    disp('Epoching relative to the event...')
+    fprintf('epoching relative to the event ...')
     option = struct('event_labels', {{'Stimulation'}}, 'x_start', epoch(1), 'x_end', epoch(2), 'x_duration', epoch(2) - epoch(1), ...
-        'suffix', suffix{5}, 'is_save', 0);
+        'suffix', suffix{2}, 'is_save', 0);
     lwdata = FLW_segmentation.get_lwdata(lwdata, option);
     
     % remove DC + linear detrend
-    disp('Removing DC and applying linear detrend...')
-    option = struct('linear_detrend', 1, 'suffix', suffix{6}, 'is_save', 1);
+    fprintf('removing DC and applying linear detrend ...')
+    option = struct('linear_detrend', 1, 'suffix', suffix{3}, 'is_save', 0);
     lwdata = FLW_dc_removal.get_lwdata(lwdata, option); 
+    
+    % baseline correction
+    fprintf('correcting for baseline ...')
+    option = struct('operation','substract', 'xstart', baseline(1), 'xend', baseline(2), 'suffix', suffix{4}, 'is_save', 1);
+    lwdata = FLW_baseline.get_lwdata(lwdata, option);
+    fprintf('done.\n')
 end
 
 % update prefix
-for s = [1, 3 : length(suffix)]
+for s = 1:length(suffix)
     prefix = [suffix{s} ' ' prefix];
 end
-clear suffix bandpass epoch ds_ratio b s dataset option lwdata 
+clear suffix epoch baseline b s dataset option lwdata    
 
-%% 4) split into conditions
+%% 4) visual inspection
+% add letswave 6 to the top of search path
+addpath(genpath([folder_toolbox '\letswave6-master']));
+letswave
+
+% load the output structure
+load('SMEP_visual.mat')
+
+% encode manually
+visual(str2num(subject(3))).discarded{1} = [];
+save('SMEP_visual.mat', 'visual');
+
+%% 5) preliminary ICA
 % ----- section input -----
+suffix = {'visual' 'prea' 'sp_filter'};
 % ------------------------- 
 % add letswave 7 to the top of search path
-addpath(genpath([folder_lw '\letswave7-master']));
+addpath(genpath([folder_toolbox '\letswave7-master']));
+
+% load the dataset
+for b = block
+    dataset{b} = [folder_data '\' suffix{1} ' ' prefix ' ' subject ' ' measure ' b' num2str(b) '.lw6'];
+end
+option = struct('filename', {dataset});
+lwdataset = FLW_load.get_lwdataset(option);
+
+% compute the ICA matrix
+fprintf('computing ICA matrix:\n')
+fprintf('\n')
+option = struct('ICA_mode', 3, 'algorithm', 1, 'percentage_PICA', 100, 'criterion_PICA', 'LAP', 'suffix', suffix{2}, 'is_save', 1);
+lwdataset = FLW_compute_ICA_merged.get_lwdataset(lwdataset, option);
+fprintf('done.\n')
+
+% update prefix
+for s = 1:length(suffix)
+    prefix = [suffix{s} ' ' prefix];
+end
+clear suffix epoch b s dataset option lwdataset 
+
+%% 6) frequency filters 
+% ----- section input -----
+suffix = {'bandpass' 'notch' 'crop' 'bc2'};
+bandpass = [100 1500];
+crop = [-0.25 0.75];
+baseline = [-0.25 -0.01];
+% -------------------------  
+% add letswave 7 to the top of search path
+addpath(genpath([folder_toolbox '\letswave7-master']));
+
+% cycle through blocks
+for b = block
+    % get the dataset
+    fprintf('%s - block %d: ', subject, b)
+    dataset = [folder_data '\' prefix ' ' subject ' ' measure ' b' num2str(b) '.lw6'];
+    option = struct('filename', dataset);
+    lwdata = FLW_load.get_lwdata(option);
+    
+    % bandpass
+    fprintf('applying Butterworth bandpass filter ...')
+    option = struct('filter_type', 'bandpass', 'high_cutoff', bandpass(2),'low_cutoff', bandpass(1),...
+        'filter_order', 4, 'suffix', suffix{1}, 'is_save', 0);
+    lwdata = FLW_butterworth_filter.get_lwdata(lwdata, option);
+    
+    % notch
+    fprintf('applying FFT notch filter ...')
+    option = struct('filter_type', 'notch', 'notch_fre', 50, 'notch_width', 2, 'slope_width', 2,...
+        'harmonic_num', 5,'suffix', suffix{2},'is_save', 0);
+    lwdata = FLW_FFT_filter.get_lwdata(lwdata, option);   
+    
+    % crop
+    fprintf('cropping ...')
+    option = struct('xcrop_chk', 1, 'xstart', crop(1), 'xend', crop(2), 'suffix', suffix{3}, 'is_save', 0);
+    lwdata = FLW_crop_epochs.get_lwdata(lwdata, option);
+    
+    % baseline correction
+    fprintf('correcting for baseline ...')
+    option = struct('operation','substract', 'xstart', baseline(1), 'xend', baseline(2), 'suffix', suffix{4}, 'is_save', 1);
+    lwdata = FLW_baseline.get_lwdata(lwdata, option);
+    fprintf('done.\n')
+end
+
+% update prefix
+for s = 1:length(suffix)
+    prefix = [suffix{s} ' ' prefix];
+end
+clear suffix bandpass crop ds_ratio b s dataset option lwdata 
+
+%% 7) split into conditions
+% add letswave 7 to the top of search path
+addpath(genpath([folder_toolbox '\letswave7-master']));
 
 % load order of stimulation --> stim_order
-folder_input = uigetdir(pwd, 'Coose the input folder');
+folder_input = uigetdir(folder_figures, 'Coose the input folder');
 load([folder_input '\SMEP_' subject([2:3]) '_stim_order.mat'])
-% S01:
-% eventcodes(10, 1:25) = condition(3);
-% eventcodes(10, 26:50) = condition(1);
-% eventcodes(10, 51:75) = condition(2);
 
 % label and cluster by condition
 fprintf('parsing per condition...\n')
 counter = 1;
 for b = block
     % get the dataset
-    dataset = [folder_output '\' prefix ' ' subject ' ' measure ' b' num2str(b) '.lw6'];
+    dataset = [folder_data '\' prefix ' ' subject ' ' measure ' b' num2str(b) '.lw6'];
     option = struct('filename', dataset);
     lwdata = FLW_load.get_lwdata(option);
     
@@ -293,27 +370,67 @@ for c = 1:length(condition)
     lwdata = FLW_merge.get_lwdata(lwdataset, option); 
 end
 clear b c e option lwdata folder_input stim_order data2merge counter lwdataset dataset
+
+%% 8) visualize
+% set the defaults
+channel = 'spinal8';
+colours = {[1 0 0] [0.075 0.624 1] [0 0 0]};
+int = [-5 2];  
+x_lim = [-15, 100];
+x_step = 0.5;
+
+% prepare x
+x = x_lim(1):x_step:x_lim(2);
+
+% plot 
+for c = 1:length(condition)
+    % load the data
+    load(sprintf('%s S09 SMEP', condition{c}))
+end
+
+% launch the figure
+fig = figure(figure_counter);
+set(gcf, 'units','centimeters','position',[10 10 20 10], 'color', 'w');
+hold on
     
-%% 5) visual inspection
-% ----- section input -----
-prefix2 = 'visual';
-% ------------------------- 
-% add letswave 6 to the top of search path
-addpath(genpath([folder_lw '\letswave6-master']));
+% determine axis properties
+xl = [x(1) - 25, x(end) + 25];
+xlim(xl);
+xlabel('time (ms)');  
+ylim(y_lim);
+ylabel('amplitude (\muV)')
 
-% open letswave and discard bad epochs based on visual inspection
-letswave
+    % loop through channels to plot
+    for a = 1:size(data_visual, 1)     
+        P(a) = plot(x, data_visual(a, :), 'Color', colour, 'LineWidth', 1);
+    end
 
-%% 6) ICA - compute matrix
+    % highlight channel
+    if ~isempty(channel_n)
+        P(end+1) =  plot(x, data_visual(channel_n, :), 'Color', [0 0 0], 'LineWidth', 3);
+    end
+
+    % shade interpolated interval 
+    rectangle('Position', [int(1), y_lim(1), int(2) - int(1), y_lim(2) - y_lim(1)], 'FaceColor', [0.85 0.85 0.85], 'EdgeColor', 'none')
+
+    % TMS stimulus
+    line([0, 0], y_lim, 'Color', [0 0 0], 'LineWidth', 3, 'LineStyle', '--')
+    
+    % other parameters
+    xlim([x(1) - length(x)*(x(2) - x(1))*0.05, x(end) + length(x)*(x(2) - x(1))*0.05])
+    set(gca, 'FontSize', 16) 
+    set(gca, 'Layer', 'Top')
+   
+%% ICA - compute matrix
 % ----- section input -----
 suffix = {'ica_PICA'};
 % ------------------------- 
 % add letswave 7 to the top of search path
-addpath(genpath([folder_lw '\letswave7-master']));
+addpath(genpath([folder_toolbox '\letswave7-master']));
 
 % load the dataset
 for c = 1:length(condition)
-    dataset{c} = [folder_output '\' prefix2 ' ' condition{c} ' ' subject ' ' measure '.lw6'];
+    dataset{c} = [folder_data '\' prefix2 ' ' condition{c} ' ' subject ' ' measure '.lw6'];
 end
 option = struct('filename', {dataset});
 lwdataset = FLW_load.get_lwdataset(option);
@@ -331,12 +448,12 @@ clear suffix c dataset option lwdataset
 suffix = {'unmix' 'timecourse' 'frequency'};
 % ------------------------- 
 % add letswave 7 to the top of search path
-addpath(genpath([folder_lw '\letswave7-master']));
+addpath(genpath([folder_toolbox '\letswave7-master']));
 
 % unmix 
 for c = 1:length(condition)
     % get the dataset
-    dataset = [folder_output '\' prefix2 ' ' condition{c} ' ' subject ' ' measure '.lw6'];
+    dataset = [folder_data '\' prefix2 ' ' condition{c} ' ' subject ' ' measure '.lw6'];
     option = struct('filename', dataset);
     lwdata = FLW_load.get_lwdata(option);
     
@@ -376,11 +493,11 @@ clear suffix c dataset option lwdataset lwdata lwdata_merged
 suffix = {'merge_epoch' 'avg_selected'};
 % -------------------------  
 % add letswave 7 to the top of search path
-addpath(genpath([folder_lw '\letswave7-master']));
+addpath(genpath([folder_toolbox '\letswave7-master']));
 
 % get the datasets
 for b = 1:length(block)
-    dataset{b} = [folder_output '\' prefix ' ' measure ' ' subject ' ' block{b} '.lw6'];
+    dataset{b} = [folder_data '\' prefix ' ' measure ' ' subject ' ' block{b} '.lw6'];
 end
 option = struct('filename', {dataset});
 lwdataset = FLW_load.get_lwdataset(option);
@@ -410,21 +527,21 @@ final_dataset = 'avg_selected';
 label = 'SELECTED';
 % -------------------------  
 % add letswave 7 to the top of search path
-addpath(genpath([folder_lw '\letswave7-master']));
+addpath(genpath([folder_toolbox '\letswave7-master']));
 
 % loop through subjects
 for s = 1:length(subj)
     % get the single trial data
     data_trials = [];
     for b = 1:length(block)
-        dataset = [folder_output '\' prefix ' ' measure ' ' subj{s} ' ' block{b} '.lw6'];
+        dataset = [folder_data '\' prefix ' ' measure ' ' subj{s} ' ' block{b} '.lw6'];
         option = struct('filename', dataset);
         lwdata = FLW_load.get_lwdata(option);
         data_trials = cat(1, data_trials, squeeze(lwdata.data));
     end
 
     % get the mean data
-    dataset = [folder_output '\' final_dataset ' merge_epoch ' prefix ' ' measure ' ' subj{s} ' ' block{1} '.lw6'];
+    dataset = [folder_data '\' final_dataset ' merge_epoch ' prefix ' ' measure ' ' subj{s} ' ' block{1} '.lw6'];
     option = struct('filename', dataset);
     lwdata = FLW_load.get_lwdata(option);
     data_mean = squeeze(lwdata.data);
@@ -550,8 +667,8 @@ time_window = [0 0.025];
 shading = [0.002 0.012];
 % -------------------------
 % load the data & header
-load([folder_output '\' prefix ' ' measure ' ' subject ' ' block{1} '.mat']);
-load([folder_output '\' prefix ' ' measure ' ' subject ' ' block{1} '.lw6'], '-mat');
+load([folder_data '\' prefix ' ' measure ' ' subject ' ' block{1} '.mat']);
+load([folder_data '\' prefix ' ' measure ' ' subject ' ' block{1} '.lw6'], '-mat');
 
 % plot timecourse
 t = header.xstart + [header.xstep*(1 : header.datasize(6))];
@@ -631,13 +748,13 @@ prefix_old = 'ECG_clean ds interp dc1';
 coordinates_path = 'F:\letswave7-master\letswave7-master\res\electrodes\spherical_locations\SPINAL_17chan.locs';
 % ------------------------- 
 % add letswave 7 to the top of search path
-addpath(genpath([folder_lw '\letswave7-master']));
+addpath(genpath([folder_toolbox '\letswave7-master']));
 
 % prepare the dataset
 for b = 1:length(block)
     % get the data
     disp([subject ' - ' block{b}])
-    dataset = [folder_output '\' prefix_old ' ' measure ' ' subject ' ' block{b} '.lw6'];
+    dataset = [folder_data '\' prefix_old ' ' measure ' ' subject ' ' block{b} '.lw6'];
     option = struct('filename', dataset);
     lwdata = FLW_load.get_lwdata(option);
     
