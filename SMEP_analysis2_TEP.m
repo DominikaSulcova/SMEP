@@ -896,6 +896,5 @@ function [EEG_out] = SSP_SIR_trials(EEG_in, L, art_topographies, filt_ker, M)
         end
 
         EEG_out.data(:,:,i) = data_correct;
-
     end
 end
